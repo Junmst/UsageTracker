@@ -1,0 +1,81 @@
+﻿<Window x:Class="UsageTrackerNative.CompactSessionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="当前会话"
+        Width="236"
+        Height="36"
+        MinWidth="236"
+        MinHeight="36"
+        MaxWidth="236"
+        MaxHeight="36"
+        WindowStartupLocation="Manual"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        ShowInTaskbar="True"
+        Topmost="True"
+        Background="Transparent">
+    <Border Margin="2"
+            Padding="8,3"
+            Background="{DynamicResource PanelBrush}"
+            BorderBrush="{DynamicResource InputBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock x:Name="SessionTitleText"
+                       Grid.Column="0"
+                       VerticalAlignment="Center"
+                       FontSize="11"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource PrimaryTextBrush}"
+                       TextWrapping="NoWrap"
+                       TextTrimming="CharacterEllipsis"
+                       Margin="0,0,6,0" />
+            <TextBlock x:Name="SessionDurationText"
+                       Grid.Column="1"
+                       VerticalAlignment="Center"
+                       FontSize="12"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource InputFocusBorderBrush}"
+                       Margin="0,0,6,0" />
+            <Button x:Name="PinButton"
+                    Grid.Column="2"
+                    Content="📌"
+                    Width="20"
+                    Height="18"
+                    Margin="0,0,6,0"
+                    Padding="0"
+                    Background="{DynamicResource ButtonBackgroundBrush}"
+                    BorderBrush="{DynamicResource InputBorderBrush}"
+                    BorderThickness="1"
+                    Foreground="{DynamicResource InputFocusBorderBrush}"
+                    FontSize="10"
+                    Click="PinButton_Click" />
+            <Button x:Name="BackToMainButton"
+                    Grid.Column="3"
+                    Content="↩"
+                    Width="20"
+                    Height="18"
+                    Padding="0"
+                    Background="{DynamicResource ButtonBackgroundBrush}"
+                    BorderBrush="{DynamicResource InputBorderBrush}"
+                    BorderThickness="1"
+                    Foreground="{DynamicResource PrimaryTextBrush}"
+                    FontWeight="SemiBold"
+                    FontSize="10"
+                    Click="BackToMainButton_Click" />
+        </Grid>
+    </Border>
+</Window>
+
+
+
+
+

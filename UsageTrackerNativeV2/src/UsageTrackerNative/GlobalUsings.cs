@@ -1,0 +1,12 @@
+// 解决 UseWindowsForms=true 时 System.Drawing 与 System.Windows 的类型歧义
+global using Brush = System.Windows.Media.Brush;
+global using Pen = System.Windows.Media.Pen;
+global using Size = System.Windows.Size;
+global using Point = System.Windows.Point;
+global using MouseEventArgs = System.Windows.Input.MouseEventArgs;
+global using Vector = System.Windows.Vector;
+global using Brushes = System.Windows.Media.Brushes;
+global using FlowDirection = System.Windows.FlowDirection;
+global using Cursors = System.Windows.Input.Cursors;
+global using ToolTip = System.Windows.Controls.ToolTip;
+global using MessageBox = System.Windows.MessageBox;

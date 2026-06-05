@@ -1,0 +1,33 @@
+<UserControl x:Class="UsageTrackerNative.Modules.Placeholders.PlaceholderModulePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Background="Transparent">
+        <Border Background="{DynamicResource PanelBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="24"
+                Padding="28">
+            <StackPanel>
+                <TextBlock x:Name="TitleText"
+                           FontSize="34"
+                           FontWeight="Black"
+                           Foreground="{DynamicResource PrimaryTextBrush}" />
+                <TextBlock x:Name="DescriptionText"
+                           Margin="0,10,0,0"
+                           FontSize="16"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           TextWrapping="Wrap" />
+                <Border Margin="0,28,0,0"
+                        Padding="18"
+                        CornerRadius="18"
+                        Background="{DynamicResource InputBackgroundBrush}"
+                        BorderBrush="{DynamicResource InputBorderBrush}"
+                        BorderThickness="1">
+                    <TextBlock Text="v2 模块占位页：后续会逐页迁移 v1 的真实功能和现有完美 UI。"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               FontWeight="SemiBold" />
+                </Border>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>
