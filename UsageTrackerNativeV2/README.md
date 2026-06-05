@@ -7,6 +7,10 @@
 [![SQLite](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite)](https://www.sqlite.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
+## 下载
+
+**[📥 下载发行版（时迹.zip）](https://github.com/Junmst/UsageTracker/raw/files/%E6%97%B6%E8%BF%B9.zip)**
+
 ---
 
 ## 简介
