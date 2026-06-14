@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿using System.Diagnostics;
+﻿﻿﻿﻿﻿using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -715,6 +715,7 @@ public partial class TimeDistributionPage : System.Windows.Controls.UserControl
 
     private static UsageSession ToUsageSession(UsageSessionRecord record)
     {
+        record.EnsureId();
         return new UsageSession
         {
             Id = record.Id,
@@ -730,11 +731,12 @@ public partial class TimeDistributionPage : System.Windows.Controls.UserControl
     private void DistributionControl_SessionClicked(object? sender, UsageSession session)
     {
         _selectedSession = session;
-        SelectedSessionTitleText.Text = $"已选会话：{session.ProcessName}";
+        var displayTitle = string.IsNullOrWhiteSpace(session.WindowTitle) ? "无标题" : session.WindowTitle;
+        SelectedSessionTitleText.Text = $"已选会话：{displayTitle}";
         var parallelText = session.HasParallelActivities
             ? $" · {session.ParallelSummaryText}（不计入主时长）"
             : string.Empty;
-        SelectedSessionMetaText.Text = $"{session.StartText} → {session.EndText} · {session.DurationText} · 分类：{session.SubjectText}{parallelText}";
+        SelectedSessionMetaText.Text = $"{session.StartText} → {session.EndText} · {session.DurationText} · 进程：{session.ProcessName} · 分类：{session.SubjectText}{parallelText}";
     }
 
     private void ViewDetailsButton_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -754,7 +756,9 @@ public partial class TimeDistributionPage : System.Windows.Controls.UserControl
             Escape(session.Id),
             Escape(session.ProcessName),
             Escape(session.WindowTitle),
-            session.StartTime.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            session.StartTime.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            session.EndTime.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            Shell.V2AppContext.NormalizeToDateBoundary(session.StartTime).Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 }
 

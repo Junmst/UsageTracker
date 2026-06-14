@@ -56,40 +56,7 @@ public static class UsageTrackerPreviewSearch
 
     private static string? MatchSubjectByKeyword(string processName, string windowTitle, Dictionary<string, List<string>> keywordRules, List<SubjectDefinition> definitions)
     {
-        foreach (var definition in definitions)
-        {
-            foreach (var parent in definition.Parents)
-            {
-                foreach (var child in parent.Children)
-                {
-                    if (MatchesSubjectRule(child, processName, windowTitle, keywordRules))
-                    {
-                        return child;
-                    }
-                }
-                if (MatchesSubjectRule(parent.Name, processName, windowTitle, keywordRules))
-                {
-                    return parent.Name;
-                }
-            }
-            if (MatchesSubjectRule(definition.Name, processName, windowTitle, keywordRules))
-            {
-                return definition.Name;
-            }
-        }
-        return null;
-    }
-
-    private static bool MatchesSubjectRule(string subject, string processName, string windowTitle, Dictionary<string, List<string>> keywordRules)
-    {
-        return keywordRules.TryGetValue(subject, out var keywords)
-            && keywords.Any(keyword => MatchesKeywordRule(keyword, processName, windowTitle));
-    }
-
-    private static bool MatchesKeywordRule(string keyword, string processName, string windowTitle)
-    {
-        return SearchExpressionMatcher.IsMatch(keyword, term => processName.Contains(term, StringComparison.OrdinalIgnoreCase)
-            || windowTitle.Contains(term, StringComparison.OrdinalIgnoreCase));
+        return SearchExpressionMatcher.ResolveSubjectByKeywordRules(definitions, keywordRules, processName, windowTitle);
     }
 
     private static string BuildClassificationKey(string processName, string windowTitle)

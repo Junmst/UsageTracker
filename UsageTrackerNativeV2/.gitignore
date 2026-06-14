@@ -1,0 +1,24 @@
+# 只保留 src 源码，忽略所有构建产物和本地工具链
+backup/
+data-backups/
+installer/
+latest/
+latest2/
+lib/
+packages/
+publish/
+releases/
+**/bin/
+**/obj/
+*.log
+*.txt
+*.before-*
+*.zip
+*.csx
+*.md
+preview/
+stage11-check/
+.vs/
+.idea/
+Thumbs.db
+.DS_Store

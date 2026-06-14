@@ -1,0 +1,7 @@
+# 只保留源码，忽略构建产物
+**/bin/
+**/obj/
+*.user
+*.suo
+.vs/
+Thumbs.db

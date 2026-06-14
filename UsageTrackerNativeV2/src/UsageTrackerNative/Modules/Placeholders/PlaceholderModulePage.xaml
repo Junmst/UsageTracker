@@ -23,7 +23,7 @@
                         Background="{DynamicResource InputBackgroundBrush}"
                         BorderBrush="{DynamicResource InputBorderBrush}"
                         BorderThickness="1">
-                    <TextBlock Text="v2 模块占位页：后续会逐页迁移 v1 的真实功能和现有完美 UI。"
+                    <TextBlock Text="{DynamicResource Placeholder.V2}"
                                Foreground="{DynamicResource SecondaryTextBrush}"
                                FontWeight="SemiBold" />
                 </Border>

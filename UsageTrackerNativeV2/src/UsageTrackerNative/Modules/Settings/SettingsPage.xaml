@@ -52,13 +52,13 @@
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Margin="0,0,0,22">
-            <TextBlock Text="设置" FontSize="34" FontWeight="Black" />
+            <TextBlock Text="{DynamicResource Settings.PageTitle}" FontSize="34" FontWeight="Black" />
         </StackPanel>
 
         <UniformGrid Grid.Row="1" Columns="3" Margin="0,0,0,16">
             <Border Style="{StaticResource SettingsCardStyle}" Margin="0,0,10,0">
                 <StackPanel>
-                    <TextBlock Text="数据工具" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
+                    <TextBlock Text="{DynamicResource Settings.DataTools}" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -72,7 +72,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="30" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="导出" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                                    <TextBlock Text="{DynamicResource Settings.Export}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" />
                                     <Border Grid.Column="1" Background="Transparent">
                                         <TextBlock Text="▾" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Black" Foreground="{DynamicResource SecondaryTextBrush}" />
                                     </Border>
@@ -85,13 +85,13 @@
                                     </Border.RenderTransform>
                                     <StackPanel>
                                         <Border Style="{StaticResource TransferMenuItemStyle}" Tag="ExportUsage" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                            <TextBlock Text="导出数据" FontWeight="SemiBold" />
+                                            <TextBlock Text="{DynamicResource Settings.ExportData}" FontWeight="SemiBold" />
                                         </Border>
                                         <Border Style="{StaticResource TransferMenuItemStyle}" Tag="ExportSettings" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                            <TextBlock Text="导出配置" FontWeight="SemiBold" />
+                                            <TextBlock Text="{DynamicResource Settings.ExportConfig}" FontWeight="SemiBold" />
                                         </Border>
                                         <Border Style="{StaticResource TransferMenuItemStyle}" Tag="ExportFull" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                            <TextBlock Text="完整备份" FontWeight="SemiBold" />
+                                            <TextBlock Text="{DynamicResource Settings.ExportFullBackup}" FontWeight="SemiBold" />
                                         </Border>
                                     </StackPanel>
                                 </Border>
@@ -104,7 +104,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="30" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="导入" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                                    <TextBlock Text="{DynamicResource Settings.Import}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" />
                                     <Border Grid.Column="1" Background="Transparent">
                                         <TextBlock Text="▾" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Black" Foreground="{DynamicResource SecondaryTextBrush}" />
                                     </Border>
@@ -117,50 +117,76 @@
                                     </Border.RenderTransform>
                                     <StackPanel>
                                         <Border Style="{StaticResource TransferMenuItemStyle}" Tag="ImportUsage" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                            <TextBlock Text="导入数据" FontWeight="SemiBold" />
+                                            <TextBlock Text="{DynamicResource Settings.ImportData}" FontWeight="SemiBold" />
                                         </Border>
                                         <Border Style="{StaticResource TransferMenuItemStyle}" Tag="ImportSettings" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                            <TextBlock Text="导入配置" FontWeight="SemiBold" />
+                                            <TextBlock Text="{DynamicResource Settings.ImportConfig}" FontWeight="SemiBold" />
                                         </Border>
                                         <Border Style="{StaticResource TransferMenuItemStyle}" Tag="ImportFull" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                            <TextBlock Text="导入完整备份" FontWeight="SemiBold" />
+                                            <TextBlock Text="{DynamicResource Settings.ImportFullBackup}" FontWeight="SemiBold" />
                                         </Border>
                                     </StackPanel>
                                 </Border>
                             </Popup>
                         </Grid>
                     </Grid>
-                    <TextBlock x:Name="StatusText" Text="就绪" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" Margin="2,4,2,0" />
+                    <TextBlock x:Name="StatusText" Text="{DynamicResource App.Ready}" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" Margin="2,4,2,0" />
                 </StackPanel>
             </Border>
 
             <Border Style="{StaticResource SettingsCardStyle}" Margin="0,0,10,0">
-                <StackPanel>
-                    <TextBlock Text="运行设置" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
-                    <Border Style="{StaticResource SettingRowStyle}" MouseLeftButtonDown="StartupRow_MouseLeftButtonDown" Cursor="Hand">
-                        <Grid>
-                            <TextBlock Text="开机自动启动" VerticalAlignment="Center" FontWeight="Bold" />
-                            <TextBlock x:Name="StartupStateText" Text="读取中" HorizontalAlignment="Right" VerticalAlignment="Center" FontWeight="Black" />
-                        </Grid>
-                    </Border>
-                    <Border Style="{StaticResource SettingRowStyle}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="空闲判定" VerticalAlignment="Center" FontWeight="Bold" />
-                            <TextBox x:Name="IdleTimeoutInput" Grid.Column="1" Height="34" Width="70" HorizontalAlignment="Right" VerticalContentAlignment="Center" PreviewKeyDown="IdleTimeoutInput_PreviewKeyDown" />
-                            <Button Grid.Column="2" Content="保存" Height="34" MinWidth="58" Margin="8,0,0,0" Click="SaveIdleTimeoutButton_Click" />
-                        </Grid>
-                    </Border>
-                </StackPanel>
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="{DynamicResource Settings.SystemSettings}" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" PreviewMouseWheel="SystemSettingsScroll_PreviewMouseWheel">
+                        <StackPanel>
+                            <Border Style="{StaticResource SettingRowStyle}" MouseLeftButtonDown="StartupRow_MouseLeftButtonDown" Cursor="Hand">
+                                <Grid>
+                                    <TextBlock Text="{DynamicResource Settings.StartupOnBoot}" VerticalAlignment="Center" FontWeight="Bold" />
+                                    <TextBlock x:Name="StartupStateText" Text="{DynamicResource Settings.Reading}" HorizontalAlignment="Right" VerticalAlignment="Center" FontWeight="Black" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{DynamicResource Settings.IdleDetection}" VerticalAlignment="Center" FontWeight="Bold" />
+                                    <TextBox x:Name="IdleTimeoutInput" Grid.Column="1" Height="34" Width="70" HorizontalAlignment="Right" VerticalContentAlignment="Center" PreviewKeyDown="IdleTimeoutInput_PreviewKeyDown" />
+                                    <Button Grid.Column="2" Content="{DynamicResource Settings.Save}" Height="34" MinWidth="58" Margin="8,0,0,0" Click="SaveIdleTimeoutButton_Click" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{DynamicResource Settings.Language}" VerticalAlignment="Center" FontWeight="Bold" />
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                        <Border x:Name="LangZhButton" CornerRadius="10" Padding="14,0" MinWidth="62" Height="34" Cursor="Hand"
+                                                Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource ButtonBorderBrush}" BorderThickness="1"
+                                                MouseLeftButtonDown="LangZhButton_MouseLeftButtonDown">
+                                            <TextBlock x:Name="LangZhText" Text="{DynamicResource Settings.Chinese}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" />
+                                        </Border>
+                                        <Border x:Name="LangEnButton" CornerRadius="10" Padding="14,0" MinWidth="62" Height="34" Margin="8,0,0,0" Cursor="Hand"
+                                                Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource ButtonBorderBrush}" BorderThickness="1"
+                                                MouseLeftButtonDown="LangEnButton_MouseLeftButtonDown">
+                                            <TextBlock x:Name="LangEnText" Text="{DynamicResource Settings.English}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" />
+                                        </Border>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
             </Border>
 
             <Border Style="{StaticResource SettingsCardStyle}">
                 <StackPanel>
-                    <TextBlock Text="快捷键" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
+                    <TextBlock Text="{DynamicResource Settings.Shortcuts}" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
                     <Border Style="{StaticResource SettingRowStyle}">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -168,9 +194,9 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="手动空闲" VerticalAlignment="Center" FontWeight="Bold" />
+                            <TextBlock Text="{DynamicResource Settings.ManualIdle}" VerticalAlignment="Center" FontWeight="Bold" />
                             <TextBox x:Name="ManualIdleShortcutInput" Grid.Column="1" Height="34" Margin="14,0,0,0" HorizontalAlignment="Stretch" VerticalContentAlignment="Center" PreviewKeyDown="ManualIdleShortcutInput_PreviewKeyDown" />
-                            <Button Grid.Column="2" Content="保存" Height="34" MinWidth="58" Margin="8,0,0,0" Click="SaveShortcutButton_Click" />
+                            <Button Grid.Column="2" Content="{DynamicResource Settings.Save}" Height="34" MinWidth="58" Margin="8,0,0,0" Click="SaveShortcutButton_Click" />
                         </Grid>
                     </Border>
                 </StackPanel>
@@ -191,7 +217,7 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="主题色" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
+                    <TextBlock Text="{DynamicResource Settings.Theme}" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
                     <Border x:Name="AccentPlane" Grid.Row="1" CornerRadius="22" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Cursor="Cross"
                             MouseLeftButtonDown="AccentPlane_MouseLeftButtonDown" MouseMove="AccentPlane_MouseMove" MouseLeftButtonUp="AccentPlane_MouseLeftButtonUp">
                         <Border.Background>
@@ -258,7 +284,7 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="颜色预览" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
+                    <TextBlock Text="{DynamicResource Settings.ColorPreview}" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
                     <Border Grid.Row="1" CornerRadius="20" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ClipToBounds="True">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -269,17 +295,17 @@
                                 <ColumnDefinition />
                                 <ColumnDefinition />
                             </Grid.ColumnDefinitions>
-                            <Border x:Name="PreviewColorSwatch" Background="{DynamicResource AccentRedBrush}"><TextBlock Text="取色预览" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Black" Foreground="White" /></Border>
-                            <Border Grid.Column="1" Background="#252525"><TextBlock Text="当前主题色" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Black" Foreground="{DynamicResource AccentRedBrush}" /></Border>
-                            <Border x:Name="CurrentColorSwatch" Grid.Row="1" Background="{DynamicResource AccentRedBrush}"><TextBlock Text="已应用" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Black" Foreground="White" /></Border>
-                            <Border Grid.Row="1" Grid.Column="1" Background="#F4F4F5"><TextBlock Text="当前主题色" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Black" Foreground="{DynamicResource AccentRedBrush}" /></Border>
+                            <Border x:Name="PreviewColorSwatch" Background="{DynamicResource AccentRedBrush}"><TextBlock Text="{DynamicResource Settings.PickPreview}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Black" Foreground="White" /></Border>
+                            <Border Grid.Column="1" Background="#252525"><TextBlock Text="{DynamicResource Settings.CurrentTheme}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Black" Foreground="{DynamicResource AccentRedBrush}" /></Border>
+                            <Border x:Name="CurrentColorSwatch" Grid.Row="1" Background="{DynamicResource AccentRedBrush}"><TextBlock Text="{DynamicResource Settings.Applied}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Black" Foreground="White" /></Border>
+                            <Border Grid.Row="1" Grid.Column="1" Background="#F4F4F5"><TextBlock Text="{DynamicResource Settings.CurrentTheme}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Black" Foreground="{DynamicResource AccentRedBrush}" /></Border>
                         </Grid>
                     </Border>
                     <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,16,0,0">
-                        <Button x:Name="AccentSlotButton1" Tag="0" Content="" MinWidth="76" Height="42" Click="AccentSlot_Click" ToolTip="左键应用保存颜色，右键保存当前主题色" />
-                        <Button x:Name="AccentSlotButton2" Tag="1" Content="" MinWidth="76" Height="42" Margin="10,0,0,0" Click="AccentSlot_Click" ToolTip="左键应用保存颜色，右键保存当前主题色" />
-                        <Button x:Name="AccentSlotButton3" Tag="2" Content="" MinWidth="76" Height="42" Margin="10,0,0,0" Click="AccentSlot_Click" ToolTip="左键应用保存颜色，右键保存当前主题色" />
-                        <Button Content="完成" MinWidth="90" Height="42" Margin="18,0,0,0" Click="DoneButton_Click" />
+                        <Button x:Name="AccentSlotButton1" Tag="0" Content="" MinWidth="76" Height="42" Click="AccentSlot_Click" ToolTip="{DynamicResource Settings.AccentSlotTooltip}" />
+                        <Button x:Name="AccentSlotButton2" Tag="1" Content="" MinWidth="76" Height="42" Margin="10,0,0,0" Click="AccentSlot_Click" ToolTip="{DynamicResource Settings.AccentSlotTooltip}" />
+                        <Button x:Name="AccentSlotButton3" Tag="2" Content="" MinWidth="76" Height="42" Margin="10,0,0,0" Click="AccentSlot_Click" ToolTip="{DynamicResource Settings.AccentSlotTooltip}" />
+                        <Button Content="{DynamicResource Settings.Done}" MinWidth="90" Height="42" Margin="18,0,0,0" Click="DoneButton_Click" />
                     </StackPanel>
                 </Grid>
             </Grid>

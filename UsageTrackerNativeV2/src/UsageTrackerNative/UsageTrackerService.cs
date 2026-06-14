@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Automation;
 using Microsoft.Win32;
 using System.Windows.Threading;
 namespace UsageTrackerNative;
@@ -43,6 +44,7 @@ public sealed class UsageTrackerService : IDisposable
     private const int ParallelAudioStartSampleThreshold = 2;
     private const int ParallelAudioStopSampleThreshold = 3;
     private static readonly TimeSpan ForegroundMediaAudioGracePeriod = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan ForegroundVideoPlaybackGracePeriod = TimeSpan.FromSeconds(8);
     private const string UsageDataZipEntryName = "usage-data.json";
     private const string FullBackupDataZipEntryName = "full-backup.json";
     private const string FullBackupSettingsZipEntryName = "settings.json";
@@ -92,12 +94,13 @@ public sealed class UsageTrackerService : IDisposable
     private DateTime? _idleAwaitingClickStartedAt;
     private bool _wasMouseButtonDown;
     public event EventHandler<SessionChangedEventArgs>? SessionChanged;
-    public UsageSession? ActiveSession => _activeRecord is null ? null : ToActiveSession(_activeRecord, DateTime.Now, _activeRecord.ManualSubject);
+    public UsageSession? ActiveSession => _activeRecord is null ? null : ToActiveSession(_activeRecord, DateTime.Now, ResolveSubjectForDisplay(_activeRecord));
     public int IdleTimeoutMinutes { get; private set; } = DefaultIdleTimeoutMinutes;
     public string ManualIdleShortcutText { get; private set; } = DefaultManualIdleShortcutText;
     public SubjectDeleteBehavior SubjectDeleteBehavior { get; private set; } = SubjectDeleteBehavior.MatchRules;
     public int DataRetentionDays => MaxDataRetentionDays;
     public string Theme { get; private set; } = "Dark";
+    public string Language { get; private set; } = "zh";
     public string ThemeAccentColor { get; private set; } = "#C62828";
     public IReadOnlyList<string> ThemeAccentRecentColors => _themeAccentRecentColors;
     public IReadOnlyList<string> ThemeAccentSlots => _themeAccentSlots;
@@ -183,9 +186,31 @@ public sealed class UsageTrackerService : IDisposable
             };
         }
     }
+    public static string LoadPersistedLanguage()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var settingsFilePath = Path.Combine(localAppData, AppDataDirectoryName, SettingsFileName);
+        if (!File.Exists(settingsFilePath)) return "zh-CN";
+        try
+        {
+            using var stream = File.OpenRead(settingsFilePath);
+            var settings = JsonSerializer.Deserialize(stream, UsageTrackerJsonContext.Default.UsageTrackerSettings);
+            return string.Equals(settings?.Language, "en", StringComparison.OrdinalIgnoreCase) ? "en-US" : "zh-CN";
+        }
+        catch (Exception ex)
+        {
+            App.LogStartupException("LoadPersistedLanguage", ex);
+            return "zh-CN";
+        }
+    }
     public void SetTheme(string theme)
     {
         Theme = NormalizeTheme(theme);
+        SaveSettingsImmediately();
+    }
+    public void SetLanguage(string language)
+    {
+        Language = string.Equals(language, "en", StringComparison.OrdinalIgnoreCase) ? "en" : "zh";
         SaveSettingsImmediately();
     }
     public void SetThemeAccentColor(string color)
@@ -486,15 +511,17 @@ public sealed class UsageTrackerService : IDisposable
     {
         var dayStart = date.Date.AddHours(4);
         var dayEnd = dayStart.AddDays(1);
-        if (IsDateRangeLoaded(dayStart, dayEnd))
-            return await Task.FromResult(GetFromMemory(dayStart, dayEnd));
-        return await Task.Run(() => { EnsureDailySnapshots(date); return _repository.GetSessionsByDate(date); });
+        var records = IsDateRangeLoaded(dayStart, dayEnd)
+            ? await Task.FromResult(GetFromMemory(dayStart, dayEnd))
+            : await Task.Run(() => { EnsureDailySnapshots(date); return _repository.GetSessionsByDate(date); });
+        return ProjectDisplaySubjects(records);
     }
     public async Task<List<UsageSessionRecord>> QuerySessionsInRangeAsync(DateTime start, DateTime end)
     {
-        if (IsDateRangeLoaded(start, end))
-            return await Task.FromResult(GetFromMemory(start, end));
-        return await Task.Run(() => _repository.GetSessionsInRange(start, end));
+        var records = IsDateRangeLoaded(start, end)
+            ? await Task.FromResult(GetFromMemory(start, end))
+            : await Task.Run(() => _repository.GetSessionsInRange(start, end));
+        return ProjectDisplaySubjects(records);
     }
     public Task<UsageOverview> QueryOverviewAsync(DateTime endExclusive)
     {
@@ -564,6 +591,24 @@ public sealed class UsageTrackerService : IDisposable
     /// </summary>
     private readonly HashSet<DateTime> _appliedSnapshotDates = new();
 
+    private List<UsageSessionRecord> ProjectDisplaySubjects(IEnumerable<UsageSessionRecord> records)
+    {
+        return records.Select(ProjectDisplaySubject).ToList();
+    }
+
+    private UsageSessionRecord ProjectDisplaySubject(UsageSessionRecord record)
+    {
+        var displaySubject = ResolveSubjectForDisplay(record);
+        if (string.Equals(displaySubject, record.ManualSubject, StringComparison.Ordinal))
+        {
+            return record;
+        }
+
+        var clone = record.Clone();
+        clone.ManualSubject = string.IsNullOrWhiteSpace(displaySubject) ? null : displaySubject;
+        return clone;
+    }
+
     private void EnsureDailySnapshots(DateTime date)
     {
         var targetDate = date.Date;
@@ -584,15 +629,7 @@ public sealed class UsageTrackerService : IDisposable
         var sessions = _repository.GetSessionsByDate(date);
         foreach (var record in sessions.Where(r => string.IsNullOrWhiteSpace(r.ManualSubject)))
         {
-            var key = BuildClassificationKey(record.ProcessName, record.WindowTitle);
-            if (_manualSubjects.TryGetValue(key, out var manualSubject))
-            {
-                record.ManualSubject = manualSubject;
-            }
-            else
-            {
-                record.ManualSubject = MatchSubjectByKeyword(record.ProcessName, record.WindowTitle);
-            }
+            record.ManualSubject = ResolveSubjectForNewSession(record);
             // Mark dirty for save
             lock (_saveLock)
             {
@@ -872,7 +909,7 @@ public sealed class UsageTrackerService : IDisposable
             }
             _activeRecord = restored;
             SaveActiveSessionIncremental();
-            RaiseChanged(null, ToActiveSession(_activeRecord, DateTime.Now, _activeRecord.ManualSubject));
+            RaiseChanged(null, ToActiveSession(_activeRecord, DateTime.Now, ResolveSubjectForDisplay(_activeRecord)));
             return;
         }
         var exists = _history.Any(x => SessionMatches(x, restored.ProcessName, restored.WindowTitle)
@@ -1650,14 +1687,14 @@ public sealed class UsageTrackerService : IDisposable
             return IdleMediaProtectionDecision.NotProtected("BackgroundMediaNotAllowedForSurface", parallelActivity);
         }
 
-        if (IsVideoPlaybackSurface(snapshot))
-        {
-            return IdleMediaProtectionDecision.Protected("MediaSurfaceWithoutAudioSession", null);
-        }
-
-        if (IsMusicPlaybackSurface(snapshot) && HasRecentForegroundAudio(snapshot))
+        if (IsMusicPlaybackSurface(snapshot) && HasRecentForegroundAudio(snapshot, ForegroundMediaAudioGracePeriod))
         {
             return IdleMediaProtectionDecision.Protected("RecentMusicSurfaceWithoutAudioSession", null);
+        }
+
+        if (IsVideoPlaybackSurface(snapshot) && HasRecentForegroundAudio(snapshot, ForegroundVideoPlaybackGracePeriod))
+        {
+            return IdleMediaProtectionDecision.Protected("RecentVideoSurfaceWithoutAudioSession", null);
         }
 
         if (IsReadingSurface(snapshot))
@@ -1705,12 +1742,12 @@ public sealed class UsageTrackerService : IDisposable
         state.LastAudibleAt = DateTime.Now;
     }
 
-    private bool HasRecentForegroundAudio(WindowSnapshot snapshot)
+    private bool HasRecentForegroundAudio(WindowSnapshot snapshot, TimeSpan gracePeriod)
     {
         var processName = NormalizeProcessName(snapshot.ProcessName);
         return _parallelAudioStates.TryGetValue(processName, out var state)
             && state.LastAudibleAt != default
-            && DateTime.Now - state.LastAudibleAt <= ForegroundMediaAudioGracePeriod;
+            && DateTime.Now - state.LastAudibleAt <= gracePeriod;
     }
 
     private bool HasWhitelistedAudioPlayback(MediaPlaybackSnapshot playback)
@@ -1804,6 +1841,14 @@ public sealed class UsageTrackerService : IDisposable
         }
 
         _lastParallelAudioStateLogAt = DateTime.Now;
+        if (playback.ActiveProcessNames.Count == 0
+            && audibleProcessNames.Count == 0
+            && activity is null
+            && _parallelAudioStates.Count == 0)
+        {
+            return;
+        }
+
         var whitelist = string.Join(", ", _parallelActivityWhitelistProcesses);
         var states = string.Join(", ", _parallelAudioStates.Select(x => $"{x.Key}:aud={x.Value.AudibleSamples}:sil={x.Value.SilentSamples}:active={x.Value.IsActiveParallel}"));
         App.LogStartupMessage(
@@ -1993,7 +2038,7 @@ public sealed class UsageTrackerService : IDisposable
             _activeRecord.ManualSubject = ResolveSubjectForNewSession(_activeRecord);
             _activeRecord.LastCapturedAt = now;
             SaveActiveSessionIncremental();
-            RaiseChanged(null, ToActiveSession(_activeRecord, now, _activeRecord.ManualSubject));
+            RaiseChanged(null, ToActiveSession(_activeRecord, now, ResolveSubjectForDisplay(_activeRecord)));
             return;
         }
         if (_activeRecord.ProcessName.Equals(snapshot.ProcessName, StringComparison.OrdinalIgnoreCase)
@@ -2002,7 +2047,7 @@ public sealed class UsageTrackerService : IDisposable
             SaveActiveSessionIncremental();
             if (!isInitial)
             {
-                RaiseChanged(null, ToActiveSession(_activeRecord, now, _activeRecord.ManualSubject));
+                RaiseChanged(null, ToActiveSession(_activeRecord, now, ResolveSubjectForDisplay(_activeRecord)));
             }
             return;
         }
@@ -2010,7 +2055,7 @@ public sealed class UsageTrackerService : IDisposable
         _activeRecord = UsageSessionRecord.Start(snapshot.ProcessName, snapshot.WindowTitle, now);
         _activeRecord.ManualSubject = ResolveSubjectForNewSession(_activeRecord);
         SaveActiveSessionIncremental();
-        RaiseChanged(closed, ToActiveSession(_activeRecord, now, _activeRecord.ManualSubject));
+        RaiseChanged(closed, ToActiveSession(_activeRecord, now, ResolveSubjectForDisplay(_activeRecord)));
     }
     private UsageSession? CloseActiveSession(DateTime endTime)
     {
@@ -2030,7 +2075,7 @@ public sealed class UsageTrackerService : IDisposable
             ? []
             : new List<ParallelActivitySnapshot> { _lastParallelActivitySnapshot.Clone() };
         _activeRecord.ParallelActivities = activeParallelActivities;
-        var closed = ToSession(_activeRecord, _activeRecord.ManualSubject);
+        var closed = ToSession(_activeRecord, ResolveSubjectForDisplay(_activeRecord));
         var closedRecord = _activeRecord;
         _history.Add(_activeRecord);
         _dirtyRecords[_activeRecord.Id] = _activeRecord;
@@ -2467,6 +2512,10 @@ public sealed class UsageTrackerService : IDisposable
         {
             Theme = NormalizeTheme(settings.Theme);
         }
+        if (!string.IsNullOrWhiteSpace(settings.Language))
+        {
+            Language = string.Equals(settings.Language, "en", StringComparison.OrdinalIgnoreCase) ? "en" : "zh";
+        }
         if (!string.IsNullOrWhiteSpace(settings.ThemeAccentColor))
         {
             ThemeAccentColor = NormalizeThemeAccentColor(settings.ThemeAccentColor);
@@ -2562,6 +2611,7 @@ public sealed class UsageTrackerService : IDisposable
             SubjectDefinitions = _subjectDefinitions.Select(x => x.Clone()).ToList(),
             SubjectOptions = null,
             Theme = Theme,
+            Language = Language,
             ThemeAccentColor = ThemeAccentColor,
             ThemeAccentRecentColors = _themeAccentRecentColors.ToList(),
             ThemeAccentSlots = _themeAccentSlots.ToList(),
@@ -3075,46 +3125,22 @@ public sealed class UsageTrackerService : IDisposable
     }
     private string? ResolveSubjectForNewSession(UsageSessionRecord record)
     {
+        var primaryTitleSubject = MatchPrimaryTitleSubjectByKeyword(record.WindowTitle);
+        if (!string.IsNullOrWhiteSpace(primaryTitleSubject))
+        {
+            return primaryTitleSubject;
+        }
+
         _manualSubjects.TryGetValue(BuildClassificationKey(record.ProcessName, record.WindowTitle), out var subject);
         return subject ?? MatchSubjectByKeyword(record.ProcessName, record.WindowTitle);
     }
     private string? MatchSubjectByKeyword(string processName, string windowTitle)
     {
-        foreach (var definition in _subjectDefinitions)
-        {
-            foreach (var parent in definition.Parents)
-            {
-                foreach (var child in parent.Children)
-                {
-                    if (MatchesSubjectRule(child, processName, windowTitle))
-                    {
-                        return child;
-                    }
-                }
-                if (MatchesSubjectRule(parent.Name, processName, windowTitle))
-                {
-                    return parent.Name;
-                }
-            }
-            if (MatchesSubjectRule(definition.Name, processName, windowTitle))
-            {
-                return definition.Name;
-            }
-        }
-        return null;
+        return SearchExpressionMatcher.ResolveSubjectByKeywordRules(_subjectDefinitions, _subjectKeywordRules, processName, windowTitle);
     }
-    private bool MatchesSubjectRule(string subject, string processName, string windowTitle)
+    private string? MatchPrimaryTitleSubjectByKeyword(string windowTitle)
     {
-        if (!_subjectKeywordRules.TryGetValue(subject, out var keywords))
-        {
-            return false;
-        }
-        return keywords.Any(keyword => MatchesKeywordRule(keyword, processName, windowTitle));
-    }
-    private static bool MatchesKeywordRule(string keyword, string processName, string windowTitle)
-    {
-        return SearchExpressionMatcher.IsMatch(keyword, term => processName.Contains(term, StringComparison.OrdinalIgnoreCase)
-            || windowTitle.Contains(term, StringComparison.OrdinalIgnoreCase));
+        return SearchExpressionMatcher.ResolvePrimaryTitleSubjectByKeywordRules(_subjectDefinitions, _subjectKeywordRules, windowTitle);
     }
     private void RemoveInvalidKeywordRules()
     {
@@ -3263,6 +3289,12 @@ public sealed class UsageTrackerService : IDisposable
     }
     private string? ResolveSubjectForDisplay(UsageSessionRecord record)
     {
+        var primaryTitleSubject = MatchPrimaryTitleSubjectByKeyword(record.WindowTitle);
+        if (!string.IsNullOrWhiteSpace(primaryTitleSubject))
+        {
+            return primaryTitleSubject;
+        }
+
         if (!string.IsNullOrWhiteSpace(record.ManualSubject))
         {
             return record.ManualSubject;
@@ -3273,13 +3305,7 @@ public sealed class UsageTrackerService : IDisposable
     {
         foreach (var record in _history.Where(record => record.StartTime.Date == DateTime.Today && string.IsNullOrWhiteSpace(record.ManualSubject)))
         {
-            var key = BuildClassificationKey(record.ProcessName, record.WindowTitle);
-            if (_manualSubjects.TryGetValue(key, out var manualSubject))
-            {
-                record.ManualSubject = manualSubject;
-                continue;
-            }
-            record.ManualSubject = MatchSubjectByKeyword(record.ProcessName, record.WindowTitle);
+            record.ManualSubject = ResolveSubjectForNewSession(record);
         }
         if (_activeRecord is not null && string.IsNullOrWhiteSpace(_activeRecord.ManualSubject))
         {
@@ -3465,6 +3491,7 @@ public sealed class UsageTrackerSettings
     public List<string>? SubjectOptions { get; set; }
     public List<SubjectDefinition>? SubjectDefinitions { get; set; }
     public string? Theme { get; set; }
+    public string? Language { get; set; }
     public string? ThemeAccentColor { get; set; }
     public List<string>? ThemeAccentRecentColors { get; set; }
     public List<string>? ThemeAccentSlots { get; set; }
@@ -3674,9 +3701,11 @@ public static class SystemActivityMonitor
 }
 public static class MediaPlaybackMonitor
 {
-    private const float SessionAudioPeakThreshold = 0.0001f;
+    private const float SessionAudioPeakThreshold = 0.005f;
+    private static readonly TimeSpan AudioDiagnosticFailureLogInterval = TimeSpan.FromMinutes(10);
     private static DateTime _lastAudioDiagnosticLogAt = DateTime.MinValue;
     private static DateTime _lastAudioDiagnosticFailureLogAt = DateTime.MinValue;
+    private static bool _preferDefaultAudioEndpointOnly;
 
     public static bool IsAnyPlaybackActive(uint preferredProcessId = 0)
     {
@@ -3703,6 +3732,11 @@ public static class MediaPlaybackMonitor
         var isPreferredProcessPlaying = false;
         IMMDeviceEnumerator? enumerator = null;
         IMMDeviceCollection? deviceCollection = null;
+        if (_preferDefaultAudioEndpointOnly)
+        {
+            return TryEnumerateDefaultPlaybackSession(preferredProcessId, out snapshot);
+        }
+
         try
         {
             enumerator = (IMMDeviceEnumerator)Activator.CreateInstance(Type.GetTypeFromCLSID(MMDeviceEnumeratorClsid, throwOnError: true)!)!;
@@ -3832,7 +3866,8 @@ public static class MediaPlaybackMonitor
         }
         catch (Exception ex)
         {
-            LogAudioDiagnosticFailure(ex);
+            _preferDefaultAudioEndpointOnly = true;
+            LogAudioDiagnosticFailure(ex, "falling back to default endpoint");
             return TryEnumerateDefaultPlaybackSession(preferredProcessId, out snapshot);
         }
         finally
@@ -3962,7 +3997,7 @@ public static class MediaPlaybackMonitor
         catch (Exception ex)
         {
             snapshot = MediaPlaybackSnapshot.Empty;
-            LogAudioDiagnosticFailure(ex);
+            LogAudioDiagnosticFailure(ex, "default endpoint unavailable");
             return false;
         }
         finally
@@ -3996,9 +4031,13 @@ public static class MediaPlaybackMonitor
 
     private static void LogAudioDiagnostic(MediaPlaybackSnapshot snapshot, IReadOnlyList<string> diagnosticSessions)
     {
+        if (!snapshot.HasAnyPlayback && diagnosticSessions.Count == 0)
+        {
+            return;
+        }
+
         var now = DateTime.Now;
-        if (now - _lastAudioDiagnosticLogAt < TimeSpan.FromSeconds(5)
-            && (snapshot.HasAnyPlayback || diagnosticSessions.Count == 0))
+        if (now - _lastAudioDiagnosticLogAt < TimeSpan.FromSeconds(5))
         {
             return;
         }
@@ -4009,16 +4048,16 @@ public static class MediaPlaybackMonitor
             $"active=[{string.Join(", ", snapshot.ActiveProcessNames)}], preferred={snapshot.PreferredProcessName}, raw=[{string.Join(", ", diagnosticSessions.Take(20))}]");
     }
 
-    private static void LogAudioDiagnosticFailure(Exception exception)
+    private static void LogAudioDiagnosticFailure(Exception exception, string context)
     {
         var now = DateTime.Now;
-        if (now - _lastAudioDiagnosticFailureLogAt < TimeSpan.FromSeconds(5))
+        if (now - _lastAudioDiagnosticFailureLogAt < AudioDiagnosticFailureLogInterval)
         {
             return;
         }
 
         _lastAudioDiagnosticFailureLogAt = now;
-        App.LogStartupMessage("AudioParallelDiagnostic", $"failed={exception.GetType().Name}: {exception.Message}");
+        App.LogStartupMessage("AudioParallelDiagnostic", $"{context}: {exception.GetType().Name}: {exception.Message}");
     }
 
     private static string TryGetProcessName(uint processId)
@@ -4222,6 +4261,11 @@ public static class ForegroundWindowTracker
             processName = "Unknown.exe";
         }
         var title = GetWindowText(handle);
+        var browserContentTitle = TryGetBrowserContentTitle(handle, processName, title);
+        if (!string.IsNullOrWhiteSpace(browserContentTitle))
+        {
+            title = browserContentTitle;
+        }
         if (string.IsNullOrWhiteSpace(title))
         {
             title = processName;
@@ -4232,6 +4276,73 @@ public static class ForegroundWindowTracker
             ProcessName = processName,
             WindowTitle = title.Trim()
         };
+    }
+    private static string? TryGetBrowserContentTitle(IntPtr handle, string processName, string fallbackTitle)
+    {
+        if (!IsBrowserProcess(processName))
+        {
+            return null;
+        }
+
+        try
+        {
+            var root = AutomationElement.FromHandle(handle);
+            var browserRoot = root.FindFirst(
+                TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ClassNameProperty, "BrowserRootView"));
+            var browserRootTitle = browserRoot?.Current.Name;
+            if (IsUsableBrowserContentTitle(browserRootTitle, fallbackTitle))
+            {
+                return browserRootTitle?.Trim();
+            }
+
+            var label = root.FindFirst(
+                TreeScope.Descendants,
+                new AndCondition(
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text),
+                    new PropertyCondition(AutomationElement.ClassNameProperty, "Label")));
+            var labelTitle = label?.Current.Name;
+            if (IsUsableBrowserContentTitle(labelTitle, fallbackTitle))
+            {
+                return labelTitle?.Trim();
+            }
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (COMException)
+        {
+        }
+
+        return null;
+    }
+
+    private static bool IsBrowserProcess(string processName)
+    {
+        return processName.Equals("msedge.exe", StringComparison.OrdinalIgnoreCase)
+            || processName.Equals("chrome.exe", StringComparison.OrdinalIgnoreCase)
+            || processName.Equals("firefox.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsUsableBrowserContentTitle(string? title, string fallbackTitle)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return false;
+        }
+
+        var normalizedTitle = title.Trim();
+        if (string.Equals(normalizedTitle, fallbackTitle.Trim(), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return !normalizedTitle.Equals("Microsoft Edge", StringComparison.OrdinalIgnoreCase)
+            && !normalizedTitle.Equals("Google Chrome", StringComparison.OrdinalIgnoreCase)
+            && !normalizedTitle.Equals("Mozilla Firefox", StringComparison.OrdinalIgnoreCase);
     }
     private static string GetWindowText(IntPtr handle)
     {

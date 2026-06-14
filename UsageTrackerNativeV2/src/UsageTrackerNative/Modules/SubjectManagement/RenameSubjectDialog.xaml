@@ -25,7 +25,7 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="重命名分类"
+                <TextBlock Text="{DynamicResource Dialog.Rename}"
                            FontSize="18"
                            FontWeight="Black"
                            Foreground="{DynamicResource PrimaryTextBrush}"
@@ -58,12 +58,12 @@
                             HorizontalAlignment="Right"
                             Margin="0,16,0,0">
                     <Button x:Name="CancelButton"
-                            Content="取消"
+                            Content="{DynamicResource Dialog.Cancel}"
                             MinWidth="88"
                             Height="38"
                             Click="CancelButton_Click" />
                     <Button x:Name="ConfirmButton"
-                            Content="确定"
+                            Content="{DynamicResource Dialog.Confirm}"
                             MinWidth="88"
                             Height="38"
                             Margin="10,0,0,0"

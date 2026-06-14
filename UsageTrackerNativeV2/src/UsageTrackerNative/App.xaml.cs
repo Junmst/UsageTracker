@@ -60,6 +60,12 @@ public partial class App : Application
             var mainWindow = new ShellWindow();
             _shellWindow = mainWindow;
             LogStartupMessage("App.OnStartup", $"After new ShellWindow(): {StartupStopwatch.ElapsedMilliseconds}ms");
+
+            // 初始化语言（从 settings.json 读取偏好，切换 MergedDictionaries）
+            var persistedLanguage = UsageTrackerService.LoadPersistedLanguage();
+            LocalizationService.Instance.SetLanguage(persistedLanguage);
+            LogStartupMessage("App.OnStartup", $"Language initialized: {persistedLanguage}");
+
             _trayHost = mainWindow;
             MainWindow = mainWindow;
             LogStartupMessage("App.OnStartup", $"Before ConfigureTray: {StartupStopwatch.ElapsedMilliseconds}ms");
@@ -78,7 +84,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             LogStartupException("OnStartup", ex);
-            Forms.MessageBox.Show($"时迹启动失败：{ex.Message}\n\n日志：{StartupLogPath}", "时迹", Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Error);
+            Forms.MessageBox.Show(string.Format(LocalizationService.Instance.Get("App.StartupFailed"), ex.Message, StartupLogPath), LocalizationService.Instance.Get("App.Name"), Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Error);
             Shutdown(1);
         }
     }
@@ -86,7 +92,7 @@ public partial class App : Application
     private static void App_DispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
     {
         LogStartupException("DispatcherUnhandledException", e.Exception);
-        Forms.MessageBox.Show($"时迹运行时发生错误：{e.Exception.Message}\n\n日志：{StartupLogPath}", "时迹", Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Error);
+        Forms.MessageBox.Show(string.Format(LocalizationService.Instance.Get("App.RuntimeError"), e.Exception.Message, StartupLogPath), LocalizationService.Instance.Get("App.Name"), Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Error);
         e.Handled = true;
     }
 

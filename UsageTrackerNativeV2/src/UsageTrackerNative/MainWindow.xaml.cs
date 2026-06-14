@@ -2336,7 +2336,7 @@ public partial class MainWindow : Window, ITrayHost
 
     private void RefreshTimeDistributionViewState()
     {
-        TimeDistributionTitleText.Text = "使用时长分布";
+        TimeDistributionTitleText.Text = LocalizationService.Instance.Get("TimeDist.UsageDurationDistribution");
         RecentSevenDaysButton.Background = _isTimeDistributionMonthView ? ThemeBrush("ButtonBackgroundBrush") : ThemeBrush("MenuSelectedBrush");
         RecentSevenDaysButton.BorderBrush = _isTimeDistributionMonthView ? ThemeBrush("ButtonBorderBrush") : ThemeBrush("InputFocusBorderBrush");
         RecentSevenDaysButton.Foreground = _isTimeDistributionMonthView ? ThemeBrush("PrimaryTextBrush") : ThemeBrush("AccentTextBrush");
@@ -2561,11 +2561,11 @@ public partial class MainWindow : Window, ITrayHost
         var selectedSessions = SessionsGrid.SelectedItems.OfType<UsageSession>().ToList();
         if (selectedSessions.Count == 0)
         {
-            SessionSelectionSummaryText.Text = "已选 0 项";
+            SessionSelectionSummaryText.Text = LocalizationService.Instance.Get("Sessions.SelectedNone");
         }
         else
         {
-            SessionSelectionSummaryText.Text = $"已选：{selectedSessions.Count} 项";
+            SessionSelectionSummaryText.Text = string.Format(LocalizationService.Instance.Get("Sessions.Selected"), selectedSessions.Count);
         }
 
         var currentDateMode = _sessionSubjectScope == SessionSubjectScope.CurrentDate;
@@ -3406,7 +3406,7 @@ public partial class MainWindow : Window, ITrayHost
         var changed = _trackerService.SetStartWithWindows(enabled);
         if (!changed)
         {
-            System.Windows.MessageBox.Show("开机自启设置失败，请以正常桌面环境运行后重试。", "设置失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show(LocalizationService.Instance.Get("Msg.AutoStartFailed"), LocalizationService.Instance.Get("Msg.SettingsFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         RefreshStartupState(enableByDefault: enabled);
@@ -3601,11 +3601,11 @@ public partial class MainWindow : Window, ITrayHost
                     await _trackerService.ExportFullBackupAsync(dialog.FileName);
                     break;
             }
-            System.Windows.MessageBox.Show($"已导出到：\n{dialog.FileName}", "导出完成", MessageBoxButton.OK, MessageBoxImage.Information);
+            System.Windows.MessageBox.Show(string.Format(LocalizationService.Instance.Get("Msg.ExportComplete"), dialog.FileName), LocalizationService.Instance.Get("Msg.ExportCompleteTitle"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"导出失败：{ex.Message}", "导出失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show(string.Format(LocalizationService.Instance.Get("Msg.ExportFailed"), ex.Message), LocalizationService.Instance.Get("Msg.ExportFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -3615,9 +3615,9 @@ public partial class MainWindow : Window, ITrayHost
 
         var title = kind switch
         {
-            TransferPayloadKind.Usage => "导入时迹数据",
-            TransferPayloadKind.Settings => "导入时迹配置",
-            _ => "导入完整备份"
+            TransferPayloadKind.Usage => LocalizationService.Instance.Get("Msg.ImportUsageData"),
+            TransferPayloadKind.Settings => LocalizationService.Instance.Get("Msg.ImportSettingsDsg"),
+            _ => LocalizationService.Instance.Get("Msg.ImportFullBackup")
         };
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
@@ -3641,8 +3641,8 @@ public partial class MainWindow : Window, ITrayHost
                 if (preview.ConflictCount > 0)
                 {
                     var choice = System.Windows.MessageBox.Show(
-                        $"检测到导入冲突。\n\n文件记录总数：{preview.TotalCount}\n可直接导入：{preview.NonConflictCount}\n冲突记录：{preview.ConflictCount}\n\n选择“是”：保留本地冲突记录，仅导入非冲突数据（推荐）\n选择“否”：使用导入文件覆盖冲突记录\n选择“取消”：不导入",
-                        "导入冲突处理",
+                        string.Format(LocalizationService.Instance.Get("Msg.ImportConflictDetected"), preview.TotalCount, preview.NonConflictCount, preview.ConflictCount),
+                        LocalizationService.Instance.Get("Msg.ImportConflictTitle"),
                         MessageBoxButton.YesNoCancel,
                         MessageBoxImage.Question,
                         MessageBoxResult.Yes);
@@ -3676,18 +3676,18 @@ public partial class MainWindow : Window, ITrayHost
 
             if (kind == TransferPayloadKind.Settings)
             {
-                System.Windows.MessageBox.Show("配置导入完成。", "导入完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show(LocalizationService.Instance.Get("Msg.ImportSettingsComplete"), LocalizationService.Instance.Get("Msg.ImportCompleteTitle"), MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
             var conflictLine = conflictStrategy == ImportConflictStrategy.UseIncoming
                 ? $"冲突覆盖导入：{result.OverwrittenCount}"
                 : $"冲突保留本地：{result.ConflictCount}";
-            System.Windows.MessageBox.Show($"导入完成。\n新增记录：{result.ImportedCount}\n{conflictLine}\n文件记录总数：{result.TotalCount}\n\n导入记录的原始分类快照已保留。", "导入完成", MessageBoxButton.OK, MessageBoxImage.Information);
+            System.Windows.MessageBox.Show(string.Format(LocalizationService.Instance.Get("Msg.ImportComplete"), result.ImportedCount, conflictLine, result.TotalCount), LocalizationService.Instance.Get("Msg.ImportCompleteTitle"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"导入失败：{ex.Message}", "导入失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show(string.Format(LocalizationService.Instance.Get("Msg.ImportFailed"), ex.Message), LocalizationService.Instance.Get("Msg.ImportFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -3743,7 +3743,7 @@ public partial class MainWindow : Window, ITrayHost
     {
         if (!int.TryParse(IdleTimeoutMinutesTextBox.Text.Trim(), out var minutes))
         {
-            System.Windows.MessageBox.Show("请输入有效的分钟数。", "设置失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show(LocalizationService.Instance.Get("Msg.InvalidMinutes"), LocalizationService.Instance.Get("Msg.SettingsFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
             RefreshIdleTimeoutState();
             return;
         }
@@ -3786,7 +3786,7 @@ public partial class MainWindow : Window, ITrayHost
 
         if (modifiers == System.Windows.Input.ModifierKeys.None)
         {
-            System.Windows.MessageBox.Show("请同时按下 Ctrl、Alt、Shift 或 Win 中至少一个键，再按一个普通键。", "快捷键设置", MessageBoxButton.OK, MessageBoxImage.Information);
+            System.Windows.MessageBox.Show(LocalizationService.Instance.Get("Msg.ShortcutInstructions"), LocalizationService.Instance.Get("Msg.ShortcutSettingTitle"), MessageBoxButton.OK, MessageBoxImage.Information);
             RefreshIdleTimeoutState();
             return;
         }
@@ -3939,7 +3939,7 @@ public partial class MainWindow : Window, ITrayHost
 
         if (showWarning)
         {
-            System.Windows.MessageBox.Show("请输入有效快捷键，例如 Ctrl+Alt+I。", "设置失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show(LocalizationService.Instance.Get("Msg.InvalidShortcut"), LocalizationService.Instance.Get("Msg.SettingsFailedTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         return null;
@@ -4325,7 +4325,7 @@ public partial class MainWindow : Window, ITrayHost
             App.LogStartupException("MainWindow.InitializeAsync", ex);
             await Dispatcher.InvokeAsync(() =>
             {
-                System.Windows.MessageBox.Show($"后台初始化失败：{ex.Message}", "时迹", MessageBoxButton.OK, MessageBoxImage.Warning);
+                System.Windows.MessageBox.Show(string.Format(LocalizationService.Instance.Get("App.BackendInitFailed"), ex.Message), LocalizationService.Instance.Get("App.Name"), MessageBoxButton.OK, MessageBoxImage.Warning);
             });
         }
     }

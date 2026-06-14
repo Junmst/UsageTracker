@@ -35,7 +35,7 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel>
-                <TextBlock Text="分类管理" FontSize="34" FontWeight="Black" />
+                <TextBlock Text="{DynamicResource Subjects.Title}" FontSize="34" FontWeight="Black" />
             </StackPanel>
             <Border Grid.Column="1" Background="{DynamicResource PanelBrushAlt}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="18" Padding="16,10" VerticalAlignment="Top">
                 <TextBlock x:Name="CurrentPathText" FontWeight="Black" />
@@ -43,7 +43,7 @@
             <TextBlock x:Name="SubjectStatusText"
                        Grid.Row="1"
                        Grid.ColumnSpan="2"
-                       Text="就绪"
+                       Text="{DynamicResource App.Ready}"
                        Foreground="{DynamicResource SecondaryTextBrush}"
                        Margin="0,10,0,0"
                        FontWeight="SemiBold" />
@@ -57,13 +57,13 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="大类" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
+                    <TextBlock Text="{DynamicResource Subjects.Major}" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="MajorPanel" />
                     </ScrollViewer>
                     <StackPanel Grid.Row="2">
                         <TextBox x:Name="MajorInput" Height="36" Margin="0,0,0,8" VerticalContentAlignment="Center" KeyDown="MajorInput_KeyDown" />
-                        <Button Content="+ 新增大类" Height="40" Click="AddMajorButton_Click" />
+                        <Button Content="{DynamicResource Subjects.AddMajor}" Height="40" Click="AddMajorButton_Click" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -75,13 +75,13 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="父类" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
+                    <TextBlock Text="{DynamicResource Subjects.Parent}" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="ParentPanel" />
                     </ScrollViewer>
                     <StackPanel Grid.Row="2">
                         <TextBox x:Name="ParentInput" Height="36" Margin="0,0,0,8" VerticalContentAlignment="Center" KeyDown="ParentInput_KeyDown" />
-                        <Button Content="+ 新增父类" Height="40" Click="AddParentButton_Click" />
+                        <Button Content="{DynamicResource Subjects.AddParent}" Height="40" Click="AddParentButton_Click" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -93,13 +93,13 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="子类" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
+                    <TextBlock Text="{DynamicResource Subjects.Child}" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="ChildPanel" />
                     </ScrollViewer>
                     <StackPanel Grid.Row="2">
                         <TextBox x:Name="ChildInput" Height="36" Margin="0,0,0,8" VerticalContentAlignment="Center" KeyDown="ChildInput_KeyDown" />
-                        <Button Content="+ 新增子类" Height="40" Click="AddChildButton_Click" />
+                        <Button Content="{DynamicResource Subjects.AddChild}" Height="40" Click="AddChildButton_Click" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -115,14 +115,14 @@
             </Grid.ColumnDefinitions>
             <Border Style="{StaticResource ManageCardStyle}" PreviewKeyDown="DetailsPanel_PreviewKeyDown">
                 <StackPanel>
-                    <TextBlock Text="当前分类详情" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
+                    <TextBlock Text="{DynamicResource Subjects.Detail}" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
                     <Border Style="{StaticResource CategoryItemStyle}"><TextBlock x:Name="SelectedNameText" VerticalAlignment="Center" FontWeight="Black" /></Border>
                     <Border Style="{StaticResource CategoryItemStyle}"><TextBlock x:Name="SelectedLevelText" VerticalAlignment="Center" FontWeight="Black" /></Border>
                     <Grid x:Name="DeleteActionHost" Margin="0,8,0,0" Height="40" MouseLeave="DeleteActionHost_MouseLeave" Background="Transparent">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                            <Button Content="重命名" MinWidth="92" Height="40" Click="RenameButton_Click" />
+                            <Button Content="{DynamicResource Subjects.Rename}" MinWidth="92" Height="40" Click="RenameButton_Click" />
                             <Button x:Name="DeleteSubjectButton"
-                                    Content="删除分类"
+                                    Content="{DynamicResource Subjects.Delete}"
                                     MinWidth="92"
                                     Height="40"
                                     Margin="10,0,0,0"
@@ -152,9 +152,9 @@
                                     BorderBrush="Transparent"
                                     Click="DeleteBehaviorButton_Click">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                    <TextBlock x:Name="PromoteDeleteModeText" Text="归为上级" FontSize="14" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="PromoteDeleteModeText" Text="{DynamicResource Subjects.Promote}" FontSize="14" FontWeight="SemiBold" />
                                     <TextBlock x:Name="DeleteModeSeparatorText" Text=" / " FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource SecondaryTextBrush}" />
-                                    <TextBlock x:Name="MatchRulesDeleteModeText" Text="匹配规则" FontSize="14" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="MatchRulesDeleteModeText" Text="{DynamicResource Subjects.MatchRules}" FontSize="14" FontWeight="SemiBold" />
                                 </StackPanel>
                             </Button>
                         </Border>
@@ -168,15 +168,15 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="关键词规则" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
+                    <TextBlock Text="{DynamicResource Subjects.Keywords}" FontSize="18" FontWeight="Black" Margin="0,0,0,14" />
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="KeywordPanel" />
                     </ScrollViewer>
                     <StackPanel Grid.Row="2" Margin="0,8,0,0">
                         <TextBox x:Name="KeywordInput" Height="36" Margin="0,0,0,8" VerticalContentAlignment="Center" KeyDown="KeywordInput_KeyDown" />
                         <StackPanel Orientation="Horizontal">
-                            <Button Content="添加关键词" MinWidth="112" Height="40" Click="AddKeywordButton_Click" />
-                            <Button Content="删除选中" MinWidth="112" Height="40" Margin="10,0,0,0" Click="DeleteLastKeywordButton_Click" />
+                            <Button Content="{DynamicResource Subjects.AddKeyword}" MinWidth="112" Height="40" Click="AddKeywordButton_Click" />
+                            <Button Content="{DynamicResource Subjects.DeleteSelected}" MinWidth="112" Height="40" Margin="10,0,0,0" Click="DeleteLastKeywordButton_Click" />
                         </StackPanel>
                     </StackPanel>
                 </Grid>
@@ -194,19 +194,19 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="并行白名单" FontSize="18" FontWeight="Black" />
+                        <TextBlock Text="{DynamicResource Subjects.ParallelWhitelist}" FontSize="18" FontWeight="Black" />
                         <Border Grid.Column="1" Background="{DynamicResource InputBackgroundBrush}" CornerRadius="999" Padding="9,3" VerticalAlignment="Center">
-                            <TextBlock x:Name="ParallelWhitelistCountText" Text="0 个" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}" />
+                            <TextBlock x:Name="ParallelWhitelistCountText" Text="{DynamicResource Subjects.CountFormat}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}" />
                         </Border>
                     </Grid>
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="ParallelWhitelistPanel" />
                     </ScrollViewer>
                     <StackPanel Grid.Row="2" Margin="0,8,0,0">
-                        <TextBox x:Name="ParallelWhitelistInput" Height="36" Margin="0,0,0,8" VerticalContentAlignment="Center" KeyDown="ParallelWhitelistInput_KeyDown" ToolTip="可一次输入多个进程名，用逗号分隔，如 QQMusic.exe, cloudmusic.exe" />
+                        <TextBox x:Name="ParallelWhitelistInput" Height="36" Margin="0,0,0,8" VerticalContentAlignment="Center" KeyDown="ParallelWhitelistInput_KeyDown" ToolTip="{DynamicResource Subjects.ParallelInputHint}" />
                         <StackPanel Orientation="Horizontal">
-                            <Button Content="添加进程" MinWidth="112" Height="40" Click="AddParallelWhitelistButton_Click" />
-                            <Button Content="删除选中" MinWidth="112" Height="40" Margin="10,0,0,0" Click="DeleteSelectedParallelWhitelistButton_Click" />
+                            <Button Content="{DynamicResource Subjects.AddProcess}" MinWidth="112" Height="40" Click="AddParallelWhitelistButton_Click" />
+                            <Button Content="{DynamicResource Subjects.DeleteSelected}" MinWidth="112" Height="40" Margin="10,0,0,0" Click="DeleteSelectedParallelWhitelistButton_Click" />
                         </StackPanel>
                     </StackPanel>
                 </Grid>

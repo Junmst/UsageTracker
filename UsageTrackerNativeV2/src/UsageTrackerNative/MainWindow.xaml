@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:td="clr-namespace:UsageTrackerNative.TimeDistribution"
-        Title="时迹"
+        Title="{DynamicResource App.Title}"
         Width="1380"
         Height="980"
         MinWidth="1080"
@@ -35,20 +35,20 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="报表" FontSize="26" FontWeight="SemiBold" />
+                        <TextBlock Text="{DynamicResource MainWindow.ReportTitle}" FontSize="26" FontWeight="SemiBold" />
                         <TextBlock x:Name="LoadingIndicator"
-                                   Text="  正在加载..."
+                                   Text="{DynamicResource App.Loading}"
                                    FontSize="14"
                                    Foreground="{DynamicResource AccentTextBrush}"
                                    VerticalAlignment="Center"
                                    Margin="8,0,0,0"
                                    Visibility="Collapsed" />
                     </StackPanel>
-                    <TextBlock Text="现代看板 · 会话分段记录 + 进程汇总 + 分类分析" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,3,0,0" />
+                    <TextBlock Text="{DynamicResource MainWindow.Subtitle}" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,3,0,0" />
                 </StackPanel>
                 <TextBlock Grid.Column="1"
                            VerticalAlignment="Center"
-                           Text="后台按精确时长统计，前端按分钟展示；支持父分类与子类配置、历史日期查看"
+                           Text="{DynamicResource MainWindow.Description}"
                            Foreground="{DynamicResource SecondaryTextBrush}"
                            TextWrapping="Wrap"
                            MaxWidth="460"
@@ -72,7 +72,7 @@
                 </ComboBox>
                 <Button Grid.Column="3"
                         x:Name="ThemeAccentButton"
-                        Content="主题色"
+                        Content="{DynamicResource Settings.Theme}"
                         Click="ThemeAccentButton_Click"
                         MinWidth="78"
                         Height="42"
@@ -117,12 +117,12 @@
                             <WrapPanel />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
-                    <Border Style="{StaticResource MetricCardBorderStyle}"><StackPanel><Grid ClipToBounds="True"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="总使用时长" Foreground="{DynamicResource SecondaryTextBrush}" /><Canvas Grid.Column="1" Height="24" ClipToBounds="True"><TextBlock x:Name="TotalTitleText" Foreground="{DynamicResource SecondaryTextBrush}" /></Canvas></Grid><TextBlock x:Name="TotalFocusText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" FontSize="26" Foreground="{DynamicResource MetricValueBrush}" /></StackPanel></Border>
-                    <Border x:Name="AverageDailyMetricCard" Style="{StaticResource MetricCardBorderStyle}" MouseRightButtonUp="AverageDailyMetricCard_MouseRightButtonUp"><StackPanel><Grid ClipToBounds="True"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="日均使用时长" Foreground="{DynamicResource SecondaryTextBrush}" /><Canvas Grid.Column="1" Height="24" ClipToBounds="True"><TextBlock x:Name="AverageDailyTitleText" Foreground="{DynamicResource SecondaryTextBrush}" /></Canvas></Grid><TextBlock x:Name="AverageDailyFocusText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" Foreground="{DynamicResource MetricValueBrush}" FontSize="26" /></StackPanel></Border>
-                    <Border Style="{StaticResource MetricCardBorderStyle}"><StackPanel><TextBlock Text="当日使用时长" Foreground="{DynamicResource SecondaryTextBrush}" /><TextBlock x:Name="TodayFocusText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" Foreground="{DynamicResource AccentBlueBrush}" FontSize="26" /></StackPanel></Border>
-                    <Border Style="{StaticResource MetricCardBorderStyle}"><StackPanel><TextBlock Text="本周使用时长" Foreground="{DynamicResource SecondaryTextBrush}" /><TextBlock x:Name="WeekFocusText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" Foreground="{DynamicResource MetricValueBrush}" FontSize="26" /></StackPanel></Border>
-                    <Border Style="{StaticResource MetricCardBorderStyle}"><StackPanel><TextBlock Text="总会话数" Foreground="{DynamicResource SecondaryTextBrush}" /><TextBlock x:Name="SessionCountText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" Foreground="{DynamicResource MetricValueBrush}" /></StackPanel></Border>
-                    <Border Style="{StaticResource MetricCardBorderStyle}"><StackPanel><TextBlock Text="不同进程数" Foreground="{DynamicResource SecondaryTextBrush}" /><TextBlock x:Name="ProcessCountText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" Foreground="{DynamicResource MetricValueBrush}" /></StackPanel></Border>
+                    <Border Style="{StaticResource MetricCardBorderStyle}"><StackPanel><Grid ClipToBounds="True"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="{DynamicResource Overview.TotalUsage}" Foreground="{DynamicResource SecondaryTextBrush}" /><Canvas Grid.Column="1" Height="24" ClipToBounds="True"><TextBlock x:Name="TotalTitleText" Foreground="{DynamicResource SecondaryTextBrush}" /></Canvas></Grid><TextBlock x:Name="TotalFocusText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" FontSize="26" Foreground="{DynamicResource MetricValueBrush}" /></StackPanel></Border>
+                    <Border x:Name="AverageDailyMetricCard" Style="{StaticResource MetricCardBorderStyle}" MouseRightButtonUp="AverageDailyMetricCard_MouseRightButtonUp"><StackPanel><Grid ClipToBounds="True"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="{DynamicResource Overview.DailyAvg}" Foreground="{DynamicResource SecondaryTextBrush}" /><Canvas Grid.Column="1" Height="24" ClipToBounds="True"><TextBlock x:Name="AverageDailyTitleText" Foreground="{DynamicResource SecondaryTextBrush}" /></Canvas></Grid><TextBlock x:Name="AverageDailyFocusText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" Foreground="{DynamicResource MetricValueBrush}" FontSize="26" /></StackPanel></Border>
+                    <Border Style="{StaticResource MetricCardBorderStyle}"><StackPanel><TextBlock Text="{DynamicResource Overview.TodayUsage}" Foreground="{DynamicResource SecondaryTextBrush}" /><TextBlock x:Name="TodayFocusText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" Foreground="{DynamicResource AccentBlueBrush}" FontSize="26" /></StackPanel></Border>
+                    <Border Style="{StaticResource MetricCardBorderStyle}"><StackPanel><TextBlock Text="{DynamicResource Overview.WeekUsage}" Foreground="{DynamicResource SecondaryTextBrush}" /><TextBlock x:Name="WeekFocusText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" Foreground="{DynamicResource MetricValueBrush}" FontSize="26" /></StackPanel></Border>
+                    <Border Style="{StaticResource MetricCardBorderStyle}"><StackPanel><TextBlock Text="{DynamicResource Overview.SessionCount}" Foreground="{DynamicResource SecondaryTextBrush}" /><TextBlock x:Name="SessionCountText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" Foreground="{DynamicResource MetricValueBrush}" /></StackPanel></Border>
+                    <Border Style="{StaticResource MetricCardBorderStyle}"><StackPanel><TextBlock Text="{DynamicResource Overview.ProcessCount}" Foreground="{DynamicResource SecondaryTextBrush}" /><TextBlock x:Name="ProcessCountText" Style="{StaticResource MetricValueStyle}" Margin="0,12,0,0" Foreground="{DynamicResource MetricValueBrush}" /></StackPanel></Border>
                 </ItemsControl>
 
                 <Grid Grid.Row="1" Margin="0,10,0,0">
@@ -146,10 +146,10 @@
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <DockPanel Grid.Column="0" Width="280" VerticalAlignment="Top" LastChildFill="False">
-                                        <TextBlock Text="使用明细" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
+                                        <TextBlock Text="{DynamicResource Sessions.Title}" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
                                         <Border Margin="12,0,0,0" Padding="10,4" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" CornerRadius="8" VerticalAlignment="Center">
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="当前活跃进程：" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
+                                                <TextBlock Text="{DynamicResource MainWindow.ActiveProcess}" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
                                                 <TextBlock x:Name="CurrentProcessText" MinWidth="80" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
                                         </Border>
@@ -176,7 +176,7 @@
                                                  KeyDown="SessionSearchTextBox_KeyDown" />
                                         <Button Grid.Column="1"
                                                 x:Name="SearchSessionsButton"
-                                                Content="全盘查找"
+                                                Content="{DynamicResource Sessions.SearchAll}"
                                                 Click="SearchSessions_Click"
                                                 MouseRightButtonUp="SearchSessionsButton_MouseRightButtonUp"
                                                 Width="88"
@@ -200,14 +200,14 @@
                                                 BorderBrush="{DynamicResource InputBorderBrush}"
                                                 BorderThickness="1">
                                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                <TextBlock x:Name="SessionScopeTodayText" Text="当日" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" VerticalAlignment="Center" />
+                                                <TextBlock x:Name="SessionScopeTodayText" Text="{DynamicResource Sessions.ScopeToday}" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" VerticalAlignment="Center" />
                                                 <TextBlock Text="/" Margin="4,0" FontSize="13" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
-                                                <TextBlock x:Name="SessionScopeHistoryText" Text="历史" FontSize="12" FontWeight="Normal" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
+                                                <TextBlock x:Name="SessionScopeHistoryText" Text="{DynamicResource Sessions.ScopeHistory}" FontSize="12" FontWeight="Normal" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
                                             </StackPanel>
                                         </Button>
                                         <Button Grid.Column="3"
                                                 x:Name="UndoSessionActionButton"
-                                                Content="撤销"
+                                                Content="{DynamicResource Sessions.Undo}"
                                                 Click="UndoSessionAction_Click"
                                                 Width="76"
                                                 Height="34"
@@ -226,7 +226,7 @@
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource SecondaryTextBrush}"
                                                TextWrapping="Wrap"
-                                               Text="已选 0 项" />
+                                               Text="{DynamicResource Sessions.SelectedCount}" />
                                 </Grid>
                                 <Grid>
                                     <ScrollViewer x:Name="SessionsOuterScrollViewer"
@@ -325,12 +325,12 @@
                                     </Style>
                                 </DataGrid.Resources>
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="进程" Binding="{Binding ProcessName}" Width="115" MinWidth="90" />
-                                        <DataGridTextColumn Header="窗口标题" Binding="{Binding WindowTitle}" Width="*" MinWidth="160" />
-                                        <DataGridTextColumn Header="分类" Binding="{Binding SubjectText}" Width="100" MinWidth="80" />
-                                        <DataGridTextColumn Header="开始时间" Binding="{Binding StartText}" Width="118" MinWidth="100" />
-                                        <DataGridTextColumn Header="结束时间" Binding="{Binding EndText}" Width="118" MinWidth="100" />
-                                        <DataGridTextColumn Header="时长" Binding="{Binding DurationText}" Width="76" MinWidth="66" />
+                                        <DataGridTextColumn Header="{DynamicResource Sessions.Column.Process}" Binding="{Binding ProcessName}" Width="115" MinWidth="90" />
+                                        <DataGridTextColumn Header="{DynamicResource Sessions.Column.WindowTitle}" Binding="{Binding WindowTitle}" Width="*" MinWidth="160" />
+                                        <DataGridTextColumn Header="{DynamicResource Sessions.Column.Subject}" Binding="{Binding SubjectText}" Width="100" MinWidth="80" />
+                                        <DataGridTextColumn Header="{DynamicResource Sessions.Column.StartTime}" Binding="{Binding StartText}" Width="118" MinWidth="100" />
+                                        <DataGridTextColumn Header="{DynamicResource Sessions.Column.EndTime}" Binding="{Binding EndText}" Width="118" MinWidth="100" />
+                                        <DataGridTextColumn Header="{DynamicResource Sessions.Column.Duration}" Binding="{Binding DurationText}" Width="76" MinWidth="66" />
                                     </DataGrid.Columns>
                                 </DataGrid>
                                     </ScrollViewer>
@@ -386,12 +386,12 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
-                                        <TextBlock x:Name="TimeDistributionTitleText" Text="使用时长分布" Style="{StaticResource SectionTitleStyle}" FontSize="16" />
-                                        <TextBlock Text="滚轮横向查看，触摸板双指左右滑动也可横向查看，Ctrl + 滚轮缩放；月视图可横向拖动并带滚动条。" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,5,0,0" />
+                                        <TextBlock x:Name="TimeDistributionTitleText" Text="{DynamicResource TimeDist.Title}" Style="{StaticResource SectionTitleStyle}" FontSize="16" />
+                                        <TextBlock Text="{DynamicResource TimeDist.Hint}" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,5,0,0" />
                                     </StackPanel>
-                                    <Button x:Name="RecentSevenDaysButton" Grid.Column="1" Content="最近七天" Click="RecentSevenDaysView_Click" MinWidth="88" Height="28" Margin="12,0,0,0" Padding="12,0" Background="{DynamicResource MenuSelectedBrush}" BorderBrush="{DynamicResource InputFocusBorderBrush}" BorderThickness="1" Foreground="{DynamicResource AccentTextBrush}" />
-                                    <Button x:Name="MonthViewButton" Grid.Column="2" Content="月视图" Click="MonthView_Click" MinWidth="76" Height="28" Margin="8,0,0,0" Padding="12,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" Foreground="{DynamicResource PrimaryTextBrush}" />
-                                    <Button x:Name="TimeDistributionFilterButton" Grid.Column="3" Content="全部分类 ▾" Click="TimeDistributionFilterButton_Click" MinWidth="108" Height="28" Margin="8,0,0,0" Padding="10,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" Foreground="{DynamicResource PrimaryTextBrush}" />
+                                    <Button x:Name="RecentSevenDaysButton" Grid.Column="1" Content="{DynamicResource TimeDist.Recent7Days}" Click="RecentSevenDaysView_Click" MinWidth="88" Height="28" Margin="12,0,0,0" Padding="12,0" Background="{DynamicResource MenuSelectedBrush}" BorderBrush="{DynamicResource InputFocusBorderBrush}" BorderThickness="1" Foreground="{DynamicResource AccentTextBrush}" />
+                                    <Button x:Name="MonthViewButton" Grid.Column="2" Content="{DynamicResource TimeDist.MonthView}" Click="MonthView_Click" MinWidth="76" Height="28" Margin="8,0,0,0" Padding="12,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" Foreground="{DynamicResource PrimaryTextBrush}" />
+                                    <Button x:Name="TimeDistributionFilterButton" Grid.Column="3" Content="{DynamicResource TimeDist.AllSubjectsFilter}" Click="TimeDistributionFilterButton_Click" MinWidth="108" Height="28" Margin="8,0,0,0" Padding="10,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" Foreground="{DynamicResource PrimaryTextBrush}" />
                                 </Grid>
                                 <!-- 分布图：专业级 DrawingVisual 渲染架构（自包含 Header + DateColumn + Chart） -->
                                 <td:TimeDistributionControl x:Name="TimeDistributionControl"
@@ -416,7 +416,7 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="389" />
                                 </Grid.RowDefinitions>
-                                <TextBlock Text="进程统计" Style="{StaticResource SectionTitleStyle}" FontSize="16" Margin="0,0,0,10" />
+                                <TextBlock Text="{DynamicResource TimeDist.ProcStats}" Style="{StaticResource SectionTitleStyle}" FontSize="16" Margin="0,0,0,10" />
                                 <ScrollViewer x:Name="ProcessStatsScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" PreviewMouseWheel="StatsScrollViewer_PreviewMouseWheel">
                                     <ListBox x:Name="SummaryItemsControl"
                                              Background="Transparent"
@@ -479,7 +479,7 @@
                                     <RowDefinition Height="327" />
                                 </Grid.RowDefinitions>
                                 <DockPanel Margin="0,0,0,12" LastChildFill="False">
-                                    <TextBlock DockPanel.Dock="Left" Text="分类统计" Style="{StaticResource SectionTitleStyle}" FontSize="16" />
+                                    <TextBlock DockPanel.Dock="Left" Text="{DynamicResource TimeDist.SubjectStats}" Style="{StaticResource SectionTitleStyle}" FontSize="16" />
                                 </DockPanel>
                                 <ScrollViewer x:Name="SubjectStatsScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Hidden" CanContentScroll="False" PreviewMouseWheel="StatsScrollViewer_PreviewMouseWheel">
                                     <ListBox x:Name="SubjectItemsControl"
@@ -598,8 +598,8 @@
 
                 <Border x:Name="SubjectManagementPanel" Grid.Row="2" Style="{StaticResource CardBorderStyle}" Margin="0,10,14,0" Visibility="Collapsed">
                     <StackPanel>
-                        <TextBlock Text="分类管理" Style="{StaticResource SectionTitleStyle}" />
-                        <TextBlock Text="支持大类、父类、子类和关键词规则；下拉栏均限制高度，内容较多时可滚动。" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,16" />
+                        <TextBlock Text="{DynamicResource Subjects.Title}" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="{DynamicResource Subjects.Description}" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,16" />
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="1*" />
@@ -609,42 +609,42 @@
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                                <TextBlock Text="大类" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
-                                <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="NewSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="NewSubjectTextBox_KeyDown" /><Button Grid.Column="1" Content="新增大类" Click="AddSubject_Click" MinWidth="90" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <TextBlock Text="{DynamicResource Subjects.Major}" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
+                                <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="NewSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="NewSubjectTextBox_KeyDown" /><Button Grid.Column="1" Content="{DynamicResource Subjects.AddMajor}" Click="AddSubject_Click" MinWidth="90" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
                                 <ComboBox x:Name="ParentSubjectList" Height="38" MaxDropDownHeight="150" Margin="0,0,0,12" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" SelectionChanged="ParentSubjectList_SelectionChanged" />
-                                <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="DeleteSelectionSummaryText" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" Text="待删除大类：0 项" /><Button Grid.Column="1" Content="清空删除栏" Click="ClearDeleteSubjects_Click" MinWidth="110" Height="30" Padding="14,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
-                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="DeleteSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="DeleteSubjectTextBox_KeyDown" TextChanged="DeleteSubjectTextBox_TextChanged" /><Button Grid.Column="1" Content="批量删除大类" Click="RemoveSubject_Click" MinWidth="110" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="DeleteSelectionSummaryText" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" Text="{DynamicResource Subjects.MajorDeleteCount}" /><Button Grid.Column="1" Content="{DynamicResource Subjects.ClearDelete}" Click="ClearDeleteSubjects_Click" MinWidth="110" Height="30" Padding="14,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="DeleteSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="DeleteSubjectTextBox_KeyDown" TextChanged="DeleteSubjectTextBox_TextChanged" /><Button Grid.Column="1" Content="{DynamicResource Subjects.BatchDeleteMajor}" Click="RemoveSubject_Click" MinWidth="110" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
                             </StackPanel>
 
                             <StackPanel Grid.Column="1" Margin="0,0,16,0">
-                                <TextBlock Text="父类" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
-                                <ComboBox x:Name="ParentSubjectComboBox" Tag="选择大类" Height="38" Padding="10,6" Margin="0,0,0,12" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" SelectionChanged="ParentSubjectComboBox_SelectionChanged" />
-                                <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="NewChildSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="NewChildSubjectTextBox_KeyDown" /><Button Grid.Column="1" Content="新增父类" Click="AddChildSubject_Click" MinWidth="90" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
-                                <ComboBox x:Name="ChildSubjectList" Tag="选择父类" Height="38" MaxDropDownHeight="150" Margin="0,0,0,12" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" SelectionChanged="ChildSubjectList_SelectionChanged" />
-                                <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="DeleteChildSelectionSummaryText" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" Text="待删除父类：0 项" /><Button Grid.Column="1" Content="清空父类删除栏" Click="ClearDeleteChildSubjects_Click" MinWidth="132" Height="30" Padding="14,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
-                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="DeleteChildSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="DeleteChildSubjectTextBox_KeyDown" TextChanged="DeleteChildSubjectTextBox_TextChanged" /><Button Grid.Column="1" Content="批量删除父类" Click="RemoveChildSubject_Click" MinWidth="110" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <TextBlock Text="{DynamicResource Subjects.Parent}" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
+                                <ComboBox x:Name="ParentSubjectComboBox" Tag="{DynamicResource Subjects.SelectMajor}" Height="38" Padding="10,6" Margin="0,0,0,12" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" SelectionChanged="ParentSubjectComboBox_SelectionChanged" />
+                                <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="NewChildSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="NewChildSubjectTextBox_KeyDown" /><Button Grid.Column="1" Content="{DynamicResource Subjects.AddParent}" Click="AddChildSubject_Click" MinWidth="90" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <ComboBox x:Name="ChildSubjectList" Tag="{DynamicResource Subjects.SelectParent}" Height="38" MaxDropDownHeight="150" Margin="0,0,0,12" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" SelectionChanged="ChildSubjectList_SelectionChanged" />
+                                <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="DeleteChildSelectionSummaryText" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" Text="{DynamicResource Subjects.ParentDeleteCount}" /><Button Grid.Column="1" Content="{DynamicResource Subjects.ClearParentDelete}" Click="ClearDeleteChildSubjects_Click" MinWidth="132" Height="30" Padding="14,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="DeleteChildSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="DeleteChildSubjectTextBox_KeyDown" TextChanged="DeleteChildSubjectTextBox_TextChanged" /><Button Grid.Column="1" Content="{DynamicResource Subjects.BatchDeleteParent}" Click="RemoveChildSubject_Click" MinWidth="110" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
                             </StackPanel>
 
                             <StackPanel Grid.Column="2" Margin="0,0,16,0">
-                                <TextBlock Text="子类" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
-                                <ComboBox x:Name="GrandChildParentComboBox" Tag="选择父类" Height="38" Padding="10,6" Margin="0,0,0,12" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" SelectionChanged="GrandChildParentComboBox_SelectionChanged" />
-                                <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="NewGrandChildSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="NewGrandChildSubjectTextBox_KeyDown" /><Button Grid.Column="1" Content="新增子类" Click="AddGrandChildSubject_Click" MinWidth="90" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
-                                <ComboBox x:Name="GrandChildSubjectList" Tag="选择子类" Height="38" MaxDropDownHeight="150" Margin="0,0,0,12" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" SelectionChanged="GrandChildSubjectList_SelectionChanged" />
-                                <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="DeleteGrandChildSelectionSummaryText" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" Text="待删除子类：0 项" /><Button Grid.Column="1" Content="清空子类删除栏" Click="ClearDeleteGrandChildSubjects_Click" MinWidth="132" Height="30" Padding="14,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
-                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="DeleteGrandChildSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="DeleteGrandChildSubjectTextBox_KeyDown" TextChanged="DeleteGrandChildSubjectTextBox_TextChanged" /><Button Grid.Column="1" Content="批量删除子类" Click="RemoveGrandChildSubject_Click" MinWidth="110" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <TextBlock Text="{DynamicResource Subjects.Child}" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
+                                <ComboBox x:Name="GrandChildParentComboBox" Tag="{DynamicResource Subjects.SelectParent}" Height="38" Padding="10,6" Margin="0,0,0,12" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" SelectionChanged="GrandChildParentComboBox_SelectionChanged" />
+                                <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="NewGrandChildSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="NewGrandChildSubjectTextBox_KeyDown" /><Button Grid.Column="1" Content="{DynamicResource Subjects.AddChild}" Click="AddGrandChildSubject_Click" MinWidth="90" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <ComboBox x:Name="GrandChildSubjectList" Tag="{DynamicResource Subjects.SelectChild}" Height="38" MaxDropDownHeight="150" Margin="0,0,0,12" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" SelectionChanged="GrandChildSubjectList_SelectionChanged" />
+                                <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="DeleteGrandChildSelectionSummaryText" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" Text="{DynamicResource Subjects.ChildDeleteCount}" /><Button Grid.Column="1" Content="{DynamicResource Subjects.ClearChildDelete}" Click="ClearDeleteGrandChildSubjects_Click" MinWidth="132" Height="30" Padding="14,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="DeleteGrandChildSubjectTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="DeleteGrandChildSubjectTextBox_KeyDown" TextChanged="DeleteGrandChildSubjectTextBox_TextChanged" /><Button Grid.Column="1" Content="{DynamicResource Subjects.BatchDeleteChild}" Click="RemoveGrandChildSubject_Click" MinWidth="110" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
                             </StackPanel>
 
                             <StackPanel Grid.Column="3">
-                                <TextBlock Text="关键词规则" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
-                                <Button x:Name="KeywordRuleSubjectButton" Content="选择分类 ▾" Height="38" Margin="0,0,0,12" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" Foreground="{DynamicResource PrimaryTextBrush}" Click="KeywordRuleSubjectButton_Click" />
-                                <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="KeywordRuleTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="KeywordRuleTextBox_KeyDown" /><Button Grid.Column="1" Content="新增规则" Click="AddKeywordRule_Click" MinWidth="90" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <TextBlock Text="{DynamicResource Subjects.Keywords}" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
+                                <Button x:Name="KeywordRuleSubjectButton" Content="{DynamicResource Subjects.SelectSubject}" Height="38" Margin="0,0,0,12" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" Foreground="{DynamicResource PrimaryTextBrush}" Click="KeywordRuleSubjectButton_Click" />
+                                <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="KeywordRuleTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="KeywordRuleTextBox_KeyDown" /><Button Grid.Column="1" Content="{DynamicResource Subjects.AddRule}" Click="AddKeywordRule_Click" MinWidth="90" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
                                 <Grid Margin="0,0,0,12">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <Button x:Name="KeywordRuleListButton"
-                                            Content="选择规则 ▾"
+                                            Content="{DynamicResource Subjects.SelectRule}"
                                             Height="38"
                                             Background="{DynamicResource InputBackgroundBrush}"
                                             BorderBrush="{DynamicResource InputBorderBrush}"
@@ -717,8 +717,8 @@
                                         </ListBox>
                                     </Border>
                                 </Grid>
-                                <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="DeleteKeywordRuleSelectionSummaryText" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" Text="待删除规则：0 项" /><Button Grid.Column="1" Content="清空规则删除栏" Click="ClearDeleteKeywordRules_Click" MinWidth="132" Height="30" Padding="14,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
-                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="DeleteKeywordRuleTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="DeleteKeywordRuleTextBox_KeyDown" TextChanged="DeleteKeywordRuleTextBox_TextChanged" /><Button Grid.Column="1" Content="删除规则" Click="RemoveKeywordRule_Click" MinWidth="90" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="DeleteKeywordRuleSelectionSummaryText" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" Text="{DynamicResource Subjects.KeywordDeleteCount}" /><Button Grid.Column="1" Content="{DynamicResource Subjects.ClearKeywordDelete}" Click="ClearDeleteKeywordRules_Click" MinWidth="132" Height="30" Padding="14,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBox x:Name="DeleteKeywordRuleTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="DeleteKeywordRuleTextBox_KeyDown" TextChanged="DeleteKeywordRuleTextBox_TextChanged" /><Button Grid.Column="1" Content="{DynamicResource Subjects.DeleteRule}" Click="RemoveKeywordRule_Click" MinWidth="90" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" /></Grid>
                             </StackPanel>
                         </Grid>
                     </StackPanel>
@@ -726,10 +726,10 @@
 
                 <Border x:Name="HistoryToolsPanel" Grid.Row="3" Style="{StaticResource CardBorderStyle}" Margin="0,14,14,0" Visibility="Collapsed">
                     <StackPanel>
-                        <TextBlock Text="历史日期查看" Style="{StaticResource SectionTitleStyle}" />
-                        <TextBlock x:Name="StartupStatusText" Text="开机自启：未启用" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,10" />
+                        <TextBlock Text="{DynamicResource Common.HistoryDate}" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock x:Name="StartupStatusText" Text="{DynamicResource Settings.StartupStatus}" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,10" />
                         <CheckBox x:Name="StartupCheckBox"
-                                  Content="开机自动启动时迹"
+                                  Content="{DynamicResource Settings.StartupEnable}"
                                   Checked="StartupCheckBox_Changed"
                                   Unchecked="StartupCheckBox_Changed"
                                   Foreground="{DynamicResource PrimaryTextBrush}"
@@ -744,13 +744,13 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="空闲判定" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" />
+                            <TextBlock Text="{DynamicResource Settings.IdleDetection}" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" />
                             <TextBox x:Name="IdleTimeoutMinutesTextBox" Grid.Column="1" Height="34" Margin="12,0,0,0" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="IdleTimeoutMinutesTextBox_KeyDown" />
-                            <Button Grid.Column="2" Content="应用" Click="ApplyIdleTimeout_Click" MinWidth="76" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" />
-                            <Button Grid.Column="3" Content="手动空闲" Click="EnterManualIdle_Click" MinWidth="96" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" />
-                            <TextBox x:Name="ManualIdleShortcutTextBox" Grid.Column="4" Height="34" Margin="12,0,0,0" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" IsReadOnly="True" ToolTip="点击后同时按下 Ctrl/Alt/Shift/Win 和另一个键自动设置" PreviewKeyDown="ManualIdleShortcutTextBox_KeyDown" />
-                            <Button Grid.Column="5" Content="应用快捷键" Click="ApplyManualIdleShortcut_Click" MinWidth="104" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" />
-                            <TextBlock x:Name="IdleTimeoutStatusText" Grid.Column="6" Margin="16,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" Text="单位：分钟" />
+                            <Button Grid.Column="2" Content="{DynamicResource Settings.Apply}" Click="ApplyIdleTimeout_Click" MinWidth="76" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" />
+                            <Button Grid.Column="3" Content="{DynamicResource Settings.ManualIdle}" Click="EnterManualIdle_Click" MinWidth="96" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" />
+                            <TextBox x:Name="ManualIdleShortcutTextBox" Grid.Column="4" Height="34" Margin="12,0,0,0" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" IsReadOnly="True" ToolTip="{DynamicResource Settings.ShortcutPrompt}" PreviewKeyDown="ManualIdleShortcutTextBox_KeyDown" />
+                            <Button Grid.Column="5" Content="{DynamicResource Settings.ApplyShortcut}" Click="ApplyManualIdleShortcut_Click" MinWidth="104" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" />
+                            <TextBlock x:Name="IdleTimeoutStatusText" Grid.Column="6" Margin="16,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" Text="{DynamicResource Settings.UnitMinutes}" />
                         </Grid>
                         <Grid Margin="0,0,0,12">
                             <Grid.ColumnDefinitions>
@@ -761,7 +761,7 @@
                             <Grid Grid.Column="0">
                                 <Button x:Name="ExportMenuButton" Click="ExportMenuButton_Click" MinWidth="110" Height="34" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                        <TextBlock Text="导出" />
+                                        <TextBlock Text="{DynamicResource Settings.Export}" />
                                         <TextBlock Text=" ▾" Margin="4,0,0,0" />
                                     </StackPanel>
                                 </Button>
@@ -772,13 +772,13 @@
                                         </Border.RenderTransform>
                                         <StackPanel>
                                             <Border Tag="ExportUsage" Padding="14,9" Cursor="Hand" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                                <TextBlock Text="导出数据" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                                                <TextBlock Text="{DynamicResource Settings.ExportData}" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                                             </Border>
                                             <Border Tag="ExportSettings" Padding="14,9" Cursor="Hand" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                                <TextBlock Text="导出配置" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                                                <TextBlock Text="{DynamicResource Settings.ExportConfig}" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                                             </Border>
                                             <Border Tag="ExportFull" Padding="14,9" Cursor="Hand" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                                <TextBlock Text="完整备份" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                                                <TextBlock Text="{DynamicResource Settings.ExportFullBackup}" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                                             </Border>
                                         </StackPanel>
                                     </Border>
@@ -787,7 +787,7 @@
                             <Grid Grid.Column="1" Margin="12,0,0,0">
                                 <Button x:Name="ImportMenuButton" Click="ImportMenuButton_Click" MinWidth="110" Height="34" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                        <TextBlock Text="导入" />
+                                        <TextBlock Text="{DynamicResource Settings.Import}" />
                                         <TextBlock Text=" ▾" Margin="4,0,0,0" />
                                     </StackPanel>
                                 </Button>
@@ -798,21 +798,21 @@
                                         </Border.RenderTransform>
                                         <StackPanel>
                                             <Border Tag="ImportUsage" Padding="14,9" Cursor="Hand" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                                <TextBlock Text="导入数据" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                                                <TextBlock Text="{DynamicResource Settings.ImportData}" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                                             </Border>
                                             <Border Tag="ImportSettings" Padding="14,9" Cursor="Hand" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                                <TextBlock Text="导入配置" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                                                <TextBlock Text="{DynamicResource Settings.ImportConfig}" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                                             </Border>
                                             <Border Tag="ImportFull" Padding="14,9" Cursor="Hand" MouseLeftButtonUp="TransferMenuItem_MouseLeftButtonUp">
-                                                <TextBlock Text="导入完整备份" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                                                <TextBlock Text="{DynamicResource Settings.ImportFullBackup}" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
                                             </Border>
                                         </StackPanel>
                                     </Border>
                                 </Popup>
                             </Grid>
-                            <TextBlock Grid.Column="2" Margin="16,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" Text="导入采用增量合并；有冲突时先询问，默认保留本地；分类快照保持原样。" />
+                            <TextBlock Grid.Column="2" Margin="16,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" Text="{DynamicResource Settings.ImportHint}" />
                         </Grid>
-                        <TextBlock x:Name="SelectedDateSummaryText" Text="当前查看：今天（含实时更新）" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,0,0,16" />
+                        <TextBlock x:Name="SelectedDateSummaryText" Text="{DynamicResource History.TodayRealtime}" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,0,0,16" />
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="220" />
@@ -821,9 +821,9 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="DatePickerTextBox" Height="34" Padding="10,6" Background="{DynamicResource InputBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" VerticalContentAlignment="Center" PreviewKeyDown="DatePickerTextBox_KeyDown" />
-                            <Button Grid.Column="1" Content="查看日期" Click="LoadSelectedDate_Click" MinWidth="96" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" />
-                            <Button Grid.Column="2" Content="回到今天" Click="ViewToday_Click" MinWidth="96" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" />
-                            <TextBlock x:Name="DateRangeHintText" Grid.Column="3" Margin="16,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" Text="日期格式：2026-05-04" TextWrapping="Wrap" />
+                            <Button Grid.Column="1" Content="{DynamicResource History.ViewDate}" Click="LoadSelectedDate_Click" MinWidth="96" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" />
+                            <Button Grid.Column="2" Content="{DynamicResource History.BackToToday}" Click="ViewToday_Click" MinWidth="96" Height="34" Margin="12,0,0,0" Padding="16,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputBorderBrush}" BorderThickness="1" FontWeight="SemiBold" />
+                            <TextBlock x:Name="DateRangeHintText" Grid.Column="3" Margin="16,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" Text="{DynamicResource History.DateFormat}" TextWrapping="Wrap" />
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -835,7 +835,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Button x:Name="SubjectManagementEntryButton"
-                                Content="分类管理"
+                                Content="{DynamicResource Subjects.Title}"
                                 Click="SubjectManagementEntryButton_Click"
                                 Height="44"
                                 Margin="0,0,8,0"
@@ -847,7 +847,7 @@
                                 FontWeight="SemiBold" />
                         <Button x:Name="HistoryToolsEntryButton"
                                 Grid.Column="1"
-                                Content="历史日期查看"
+                                Content="{DynamicResource Common.HistoryDate}"
                                 Click="HistoryToolsEntryButton_Click"
                                 Height="44"
                                 Margin="8,0,0,0"

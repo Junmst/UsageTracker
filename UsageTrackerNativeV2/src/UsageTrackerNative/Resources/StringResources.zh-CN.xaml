@@ -1,0 +1,321 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <!-- === 应用级 === -->
+    <sys:String x:Key="App.Title">时迹</sys:String>
+    <sys:String x:Key="App.Loading">正在加载...</sys:String>
+    <sys:String x:Key="App.Ready">就绪</sys:String>
+    <sys:String x:Key="MainWindow.ReportTitle">报表</sys:String>
+    <sys:String x:Key="MainWindow.Subtitle">现代看板 · 会话分段记录 + 进程汇总 + 分类分析</sys:String>
+    <sys:String x:Key="MainWindow.Description">后台按精确时长统计，前端按分钟展示；支持父分类与子类配置、历史日期查看</sys:String>
+
+    <!-- === 托盘菜单 === -->
+    <sys:String x:Key="Tray.OpenMain">打开主界面</sys:String>
+    <sys:String x:Key="Tray.Compact">小窗模式</sys:String>
+    <sys:String x:Key="Tray.Exit">退出</sys:String>
+
+    <!-- === Shell 窗口 === -->
+    <sys:String x:Key="Shell.WindowTitle">时迹</sys:String>
+    <sys:String x:Key="Shell.Pin">小窗</sys:String>
+    <sys:String x:Key="Shell.Exit">退出</sys:String>
+
+    <!-- === 小窗 === -->
+    <sys:String x:Key="Compact.Title">当前会话</sys:String>
+    <sys:String x:Key="Compact.Idle">空闲</sys:String>
+    <sys:String x:Key="Compact.Pinned">已固定在最前端</sys:String>
+    <sys:String x:Key="Compact.PinHint">点击固定在最前端</sys:String>
+
+    <!-- === 设置页 === -->
+    <sys:String x:Key="Settings.PageTitle">设置</sys:String>
+    <sys:String x:Key="Settings.SystemSettings">系统设置</sys:String>
+    <sys:String x:Key="Settings.StartupOnBoot">开机自动启动</sys:String>
+    <sys:String x:Key="Settings.IdleDetection">空闲判定</sys:String>
+    <sys:String x:Key="Settings.Language">语言 / Language</sys:String>
+    <sys:String x:Key="Settings.Save">保存</sys:String>
+    <sys:String x:Key="Settings.Apply">应用</sys:String>
+    <sys:String x:Key="Settings.Chinese">中文</sys:String>
+    <sys:String x:Key="Settings.English">English</sys:String>
+    <sys:String x:Key="Settings.ManualIdle">手动空闲</sys:String>
+    <sys:String x:Key="Settings.ApplyShortcut">应用快捷键</sys:String>
+    <sys:String x:Key="Settings.UnitMinutes">单位：分钟</sys:String>
+    <sys:String x:Key="Settings.Enabled">开启</sys:String>
+    <sys:String x:Key="Settings.Disabled">关闭</sys:String>
+    <sys:String x:Key="Settings.Reading">读取中</sys:String>
+    <sys:String x:Key="Settings.ShortcutPrompt">点击后同时按下 Ctrl/Alt/Shift/Win 和另一个键自动设置</sys:String>
+    <sys:String x:Key="Settings.StartupEnable">开机自动启动时迹</sys:String>
+
+    <!-- === 设置页 - 主题色 === -->
+    <sys:String x:Key="Settings.Theme">主题色</sys:String>
+    <sys:String x:Key="Settings.ThemePicker">选择主题色</sys:String>
+    <sys:String x:Key="Settings.CustomColor">添加自定义颜色…</sys:String>
+    <sys:String x:Key="Settings.CurrentColor">当前</sys:String>
+
+    <!-- === 设置页 - 数据工具 === -->
+    <sys:String x:Key="Settings.DataTools">数据工具</sys:String>
+    <sys:String x:Key="Settings.Export">导出</sys:String>
+    <sys:String x:Key="Settings.ExportData">导出数据</sys:String>
+    <sys:String x:Key="Settings.ExportConfig">导出配置</sys:String>
+    <sys:String x:Key="Settings.ExportFullBackup">完整备份</sys:String>
+    <sys:String x:Key="Settings.Import">导入</sys:String>
+    <sys:String x:Key="Settings.ImportData">导入数据</sys:String>
+    <sys:String x:Key="Settings.ImportConfig">导入配置</sys:String>
+    <sys:String x:Key="Settings.ImportFullBackup">导入完整备份</sys:String>
+    <sys:String x:Key="Settings.ImportHint">导入采用增量合并；有冲突时先询问，默认保留本地；分类快照保持原样。</sys:String>
+
+    <!-- === 概览页 === -->
+    <sys:String x:Key="Overview.TodayDashboard">今日看板</sys:String>
+    <sys:String x:Key="Overview.Year">年</sys:String>
+    <sys:String x:Key="Overview.Month">月</sys:String>
+    <sys:String x:Key="Overview.Day">日</sys:String>
+    <sys:String x:Key="Overview.GoTo">跳转</sys:String>
+    <sys:String x:Key="Overview.Today">今天</sys:String>
+    <sys:String x:Key="Overview.Loading">正在加载</sys:String>
+    <sys:String x:Key="Overview.TotalUsage">总使用时长</sys:String>
+    <sys:String x:Key="Overview.DailyAvg">日均使用</sys:String>
+    <sys:String x:Key="Overview.TodayUsage">当日使用</sys:String>
+    <sys:String x:Key="Overview.WeekUsage">本周使用</sys:String>
+    <sys:String x:Key="Overview.SessionCount">会话数</sys:String>
+    <sys:String x:Key="Overview.ProcessCount">进程数</sys:String>
+    <sys:String x:Key="Overview.DataStatus">数据状态</sys:String>
+    <sys:String x:Key="Overview.EarliestRecord">最早记录</sys:String>
+    <sys:String x:Key="Overview.CurrentScope">当前范围</sys:String>
+    <sys:String x:Key="Overview.ActiveState">活跃状态</sys:String>
+    <sys:String x:Key="Overview.WaitingInit">等待初始化</sys:String>
+
+    <!-- === 会话页 === -->
+    <sys:String x:Key="Sessions.Title">使用明细</sys:String>
+    <sys:String x:Key="Sessions.ActiveSession">当前活跃：等待接入追踪服务</sys:String>
+    <sys:String x:Key="Sessions.ActiveIdle">当前活跃：空闲</sys:String>
+    <sys:String x:Key="Sessions.ActiveFormat">当前活跃：{0} · {1}</sys:String>
+    <sys:String x:Key="Sessions.ExitPreview">退出仅查看</sys:String>
+    <sys:String x:Key="Sessions.SearchPlaceholder">搜索进程 / 标题 / 分类</sys:String>
+    <sys:String x:Key="Sessions.SearchAll">全盘查找</sys:String>
+    <sys:String x:Key="Sessions.SearchSubject">分类查找</sys:String>
+    <sys:String x:Key="Sessions.SearchTitle">标题查找</sys:String>
+    <sys:String x:Key="Sessions.SearchProcess">进程查找</sys:String>
+    <sys:String x:Key="Sessions.ScopeToday">当日</sys:String>
+    <sys:String x:Key="Sessions.ScopeHistory">历史</sys:String>
+    <sys:String x:Key="Sessions.Undo">撤销</sys:String>
+    <sys:String x:Key="Sessions.Delete">删除</sys:String>
+    <sys:String x:Key="Sessions.SelectedCount">已选 {0} 项</sys:String>
+    <sys:String x:Key="Sessions.PreviewMode">仅查看模式：{0}。当前页面使用导入包内存数据，后台实时记录仍写入本地正式库。</sys:String>
+    <sys:String x:Key="Sessions.Column.Process">进程</sys:String>
+    <sys:String x:Key="Sessions.Column.WindowTitle">窗口标题</sys:String>
+    <sys:String x:Key="Sessions.Column.Subject">分类</sys:String>
+    <sys:String x:Key="Sessions.Column.StartTime">开始时间</sys:String>
+    <sys:String x:Key="Sessions.Column.EndTime">结束时间</sys:String>
+    <sys:String x:Key="Sessions.Column.Duration">时长</sys:String>
+    <sys:String x:Key="Sessions.ParallelActivity">并行活动（不计入主使用时长）</sys:String>
+    <sys:String x:Key="Sessions.ParallelLabel">并行</sys:String>
+    <sys:String x:Key="Sessions.NoSession">当天暂无会话记录</sys:String>
+    <sys:String x:Key="Sessions.Unclassified">未分类</sys:String>
+    <sys:String x:Key="Sessions.EmptySubject">空分类</sys:String>
+
+    <!-- === 分类管理 === -->
+    <sys:String x:Key="Subjects.Title">分类管理</sys:String>
+    <sys:String x:Key="Subjects.Major">大类</sys:String>
+    <sys:String x:Key="Subjects.Parent">父类</sys:String>
+    <sys:String x:Key="Subjects.Child">子类</sys:String>
+    <sys:String x:Key="Subjects.Detail">当前分类详情</sys:String>
+    <sys:String x:Key="Subjects.Rename">重命名</sys:String>
+    <sys:String x:Key="Subjects.Delete">删除分类</sys:String>
+    <sys:String x:Key="Subjects.Promote">归为上级</sys:String>
+    <sys:String x:Key="Subjects.MatchRules">匹配规则</sys:String>
+    <sys:String x:Key="Subjects.Keywords">关键词规则</sys:String>
+    <sys:String x:Key="Subjects.KeywordDeleteCount">待删除规则：0 项</sys:String>
+    <sys:String x:Key="Subjects.ClearKeywordDelete">清空规则删除栏</sys:String>
+    <sys:String x:Key="Subjects.DeleteRule">删除规则</sys:String>
+    <sys:String x:Key="Subjects.ParallelEnterHint">输入进程名，多个用逗号分隔，如 QQMusic.exe, cloudmusic.exe</sys:String>
+    <sys:String x:Key="Subjects.AddRule">新增规则</sys:String>
+    <sys:String x:Key="Subjects.DeleteSelected">删除选中</sys:String>
+    <sys:String x:Key="Subjects.ClearDelete">清空删除栏</sys:String>
+    <sys:String x:Key="Subjects.ClearParentDelete">清空父类删除栏</sys:String>
+    <sys:String x:Key="Subjects.ClearChildDelete">清空子类删除栏</sys:String>
+    <sys:String x:Key="Subjects.BatchDeleteMajor">批量删除大类</sys:String>
+    <sys:String x:Key="Subjects.BatchDeleteParent">批量删除父类</sys:String>
+    <sys:String x:Key="Subjects.BatchDeleteChild">批量删除子类</sys:String>
+    <sys:String x:Key="Subjects.MajorDeleteCount">待删除大类：0 项</sys:String>
+    <sys:String x:Key="Subjects.ParentDeleteCount">待删除父类：0 项</sys:String>
+    <sys:String x:Key="Subjects.ChildDeleteCount">待删除子类：0 项</sys:String>
+    <sys:String x:Key="Subjects.AddMajor">+ 新增大类</sys:String>
+    <sys:String x:Key="Subjects.AddParent">+ 新增父类</sys:String>
+    <sys:String x:Key="Subjects.AddChild">+ 新增子类</sys:String>
+    <sys:String x:Key="Subjects.SelectMajor">选择大类</sys:String>
+    <sys:String x:Key="Subjects.SelectParent">选择父类</sys:String>
+    <sys:String x:Key="Subjects.SelectChild">选择子类</sys:String>
+    <sys:String x:Key="Subjects.SelectSubject">选择分类 ▾</sys:String>
+    <sys:String x:Key="Subjects.SelectRule">选择规则 ▾</sys:String>
+    <sys:String x:Key="Subjects.RulesSelected">已选 {0} 项 ▾</sys:String>
+    <sys:String x:Key="Subjects.ParallelWhitelist">并行白名单</sys:String>
+    <sys:String x:Key="Subjects.ParallelInputHint">可一次输入多个进程名，用逗号分隔，如 QQMusic.exe, cloudmusic.exe</sys:String>
+    <sys:String x:Key="Subjects.AddProcess">添加进程</sys:String>
+    <sys:String x:Key="Subjects.CountFormat">0 个</sys:String>
+
+    <!-- === 时间分布 === -->
+    <sys:String x:Key="TimeDist.Title">使用时长分布</sys:String>
+    <sys:String x:Key="TimeDist.AllSubjects">全部分类</sys:String>
+    <sys:String x:Key="TimeDist.AllSubjectsFilter">全部分类 ▾</sys:String>
+    <sys:String x:Key="TimeDist.Recent7Days">最近七天</sys:String>
+    <sys:String x:Key="TimeDist.MonthView">月视图</sys:String>
+    <sys:String x:Key="TimeDist.Hint">滚轮横向查看，触摸板双指左右滑动也可横向查看，Ctrl + 滚轮缩放；月视图可横向拖动并带滚动条。</sys:String>
+    <sys:String x:Key="TimeDist.ProcStats">进程统计</sys:String>
+    <sys:String x:Key="TimeDist.SubjectStats">分类统计</sys:String>
+    <sys:String x:Key="TimeDist.SelectedSession">已选会话：{0}</sys:String>
+    <sys:String x:Key="TimeDist.SessionDetail">{0} → {1} · {2} · 分类：{3}</sys:String>
+    <sys:String x:Key="TimeDist.NoSelection">未选择会话</sys:String>
+    <sys:String x:Key="TimeDist.ViewDetails">查看完整明细</sys:String>
+
+    <!-- === 历史日期 === -->
+    <sys:String x:Key="History.ViewDate">查看日期</sys:String>
+    <sys:String x:Key="History.BackToToday">回到今天</sys:String>
+    <sys:String x:Key="History.DateFormat">日期格式：2026-05-04</sys:String>
+    <sys:String x:Key="History.TodayRealtime">当前查看：今天（含实时更新）</sys:String>
+    <sys:String x:Key="History.TodayLoading">当前查看：今天（正在加载）</sys:String>
+    <sys:String x:Key="History.Historical">当前查看：{0}（历史数据）</sys:String>
+    <sys:String x:Key="History.LoadFailed">当前查看：{0}（加载失败）</sys:String>
+
+    <!-- === 对话框 === -->
+    <sys:String x:Key="Dialog.DeleteChoice">选择删除后的分类方式</sys:String>
+    <sys:String x:Key="Dialog.DeleteHint">请选择删除后的处理方式</sys:String>
+    <sys:String x:Key="Dialog.AutoReclassify">自动重分类</sys:String>
+    <sys:String x:Key="Dialog.PromoteUp">归为上一层</sys:String>
+    <sys:String x:Key="Dialog.Cancel">取消</sys:String>
+    <sys:String x:Key="Dialog.Confirm">确定</sys:String>
+    <sys:String x:Key="Dialog.Rename">重命名分类</sys:String>
+
+    <!-- === 常见 === -->
+    <sys:String x:Key="Common.Today">今天</sys:String>
+    <sys:String x:Key="Common.Yesterday">昨天</sys:String>
+    <sys:String x:Key="Common.Monday">周一</sys:String>
+    <sys:String x:Key="Common.Tuesday">周二</sys:String>
+    <sys:String x:Key="Common.Wednesday">周三</sys:String>
+    <sys:String x:Key="Common.Thursday">周四</sys:String>
+    <sys:String x:Key="Common.Friday">周五</sys:String>
+    <sys:String x:Key="Common.Saturday">周六</sys:String>
+    <sys:String x:Key="Common.Sunday">周日</sys:String>
+    <sys:String x:Key="Common.Idle">空闲</sys:String>
+    <sys:String x:Key="Common.HistoryDate">历史日期</sys:String>
+
+    <!-- === 错误/状态 === -->
+    <sys:String x:Key="Status.LoadingRecent">正在加载最近数据...</sys:String>
+    <sys:String x:Key="Status.LoadingHistory">正在加载历史数据...</sys:String>
+    <sys:String x:Key="Status.LoadingToday">正在加载当天数据...</sys:String>
+    <sys:String x:Key="Status.TodayReady">当天数据已就绪，正在加载历史数据...</sys:String>
+    <sys:String x:Key="Error.StartupFail">时迹启动失败：{0}\n\n日志：{1}</sys:String>
+    <sys:String x:Key="Error.RuntimeError">时迹运行时发生错误：{0}\n\n日志：{1}</sys:String>
+
+    <!-- === 分类管理补充 === -->
+    <sys:String x:Key="Subjects.Description">支持大类、父类、子类和关键词规则；下拉栏均限制高度，内容较多时可滚动。</sys:String>
+
+    <!-- === 设置补充 === -->
+    <sys:String x:Key="Settings.Shortcuts">快捷键</sys:String>
+    <sys:String x:Key="Settings.ColorPreview">颜色预览</sys:String>
+    <sys:String x:Key="Settings.PickPreview">取色预览</sys:String>
+    <sys:String x:Key="Settings.CurrentTheme">当前主题色</sys:String>
+    <sys:String x:Key="Settings.Applied">已应用</sys:String>
+    <sys:String x:Key="Settings.StartupStatus">开机自启：{0}</sys:String>
+
+    <!-- === 主窗口补充 === -->
+    <sys:String x:Key="MainWindow.ActiveProcess">当前活跃进程：</sys:String>
+
+    <!-- === 导入预览窗口 === -->
+    <sys:String x:Key="Import.Title">导入预览</sys:String>
+    <sys:String x:Key="Import.RecordCount">记录数</sys:String>
+    <sys:String x:Key="Import.NewConflicts">新增 / 冲突</sys:String>
+    <sys:String x:Key="Import.CategoryRules">分类 / 规则</sys:String>
+    <sys:String x:Key="Import.TimeRange">时间范围</sys:String>
+    <sys:String x:Key="Import.DataProcessing">数据处理</sys:String>
+    <sys:String x:Key="Import.ConflictStrategy">冲突策略</sys:String>
+    <sys:String x:Key="Import.ConfigProcessing">配置处理</sys:String>
+    <sys:String x:Key="Import.ConfigSummary">配置摘要</sys:String>
+    <sys:String x:Key="Import.PreviewOnly">预览只读取导入包内容；后台实时记录仍写入本地正式库，不混入此处列表。</sys:String>
+    <sys:String x:Key="Import.ConfirmReplace">我确认替换本地内容，并已知系统会先自动备份</sys:String>
+    <sys:String x:Key="Import.Execute">执行</sys:String>
+    <sys:String x:Key="Import.Column.Start">开始</sys:String>
+    <sys:String x:Key="Import.Column.Title">标题</sys:String>
+
+    <!-- === 补充 === -->
+    <sys:String x:Key="Settings.Done">完成</sys:String>
+    <sys:String x:Key="Settings.AccentSlotTooltip">左键应用保存颜色，右键保存当前主题色</sys:String>
+    <sys:String x:Key="Sessions.ParallelTooltip">并行活动不计入主使用时长</sys:String>
+
+    <!-- === v2 占位 === -->
+    <sys:String x:Key="Placeholder.V2">v2 模块占位页：后续会逐页迁移 v1 的真实功能和现有完美 UI。</sys:String>
+
+    <!-- === Round 3: Code-behind 国际化 === -->
+
+    <!-- Module sidebar titles -->
+    <sys:String x:Key="Module.Overview">总览</sys:String>
+    <sys:String x:Key="Module.Sessions">使用明细</sys:String>
+    <sys:String x:Key="Module.Process">进程统计</sys:String>
+    <sys:String x:Key="Module.Distribution">时长分布</sys:String>
+    <sys:String x:Key="Module.Subject">分类统计</sys:String>
+    <sys:String x:Key="Module.SubjectManagement">分类管理</sys:String>
+    <sys:String x:Key="Module.Settings">设置</sys:String>
+
+    <!-- App-level messages -->
+    <sys:String x:Key="App.Name">时迹</sys:String>
+    <sys:String x:Key="App.StartupFailed">时迹启动失败：{0}
+
+日志：{1}</sys:String>
+    <sys:String x:Key="App.RuntimeError">时迹运行时发生错误：{0}
+
+日志：{1}</sys:String>
+    <sys:String x:Key="App.BackendInitFailed">后台初始化失败：{0}</sys:String>
+
+    <!-- Overview code-behind text -->
+    <sys:String x:Key="Overview.Initializing">正在初始化数据服务</sys:String>
+    <sys:String x:Key="Overview.InitDatabase">正在加载数据库和追踪服务</sys:String>
+    <sys:String x:Key="Overview.InitFailed">初始化失败：{0}</sys:String>
+    <sys:String x:Key="Overview.ViewingToday">当前查看：今天（含实时更新）</sys:String>
+    <sys:String x:Key="Overview.ViewingFuture">当前查看：未来日期</sys:String>
+    <sys:String x:Key="Overview.ViewingHistory">当前查看：历史日期</sys:String>
+    <sys:String x:Key="Overview.DateSwitched">日期已切换</sys:String>
+    <sys:String x:Key="Overview.InvalidDate">日期无效，请输入合法年月日</sys:String>
+    <sys:String x:Key="Overview.ViewingPreview">当前查看：导入包内存数据（仅查看）</sys:String>
+
+    <!-- Messages / Dialogs -->
+    <sys:String x:Key="Msg.SettingsFailedTitle">设置失败</sys:String>
+    <sys:String x:Key="Msg.ExportCompleteTitle">导出完成</sys:String>
+    <sys:String x:Key="Msg.ExportFailedTitle">导出失败</sys:String>
+    <sys:String x:Key="Msg.ImportCompleteTitle">导入完成</sys:String>
+    <sys:String x:Key="Msg.ImportFailedTitle">导入失败</sys:String>
+    <sys:String x:Key="Msg.ImportConflictTitle">导入冲突处理</sys:String>
+    <sys:String x:Key="Msg.ShortcutSettingTitle">快捷键设置</sys:String>
+    <sys:String x:Key="Msg.ExportComplete">已导出到：
+{0}</sys:String>
+    <sys:String x:Key="Msg.ExportFailed">导出失败：{0}</sys:String>
+    <sys:String x:Key="Msg.ImportFailed">导入失败：{0}</sys:String>
+    <sys:String x:Key="Msg.InvalidShortcut">请输入有效快捷键，例如 Ctrl+Alt+I。</sys:String>
+    <sys:String x:Key="Msg.InvalidMinutes">请输入有效的分钟数。</sys:String>
+    <sys:String x:Key="Msg.AutoStartFailed">开机自启设置失败，请以正常桌面环境运行后重试。</sys:String>
+    <sys:String x:Key="Msg.ShortcutInstructions">请同时按下 Ctrl、Alt、Shift 或 Win 中至少一个键，再按一个普通键。</sys:String>
+    <sys:String x:Key="Msg.ImportSettingsComplete">配置导入完成。</sys:String>
+    <sys:String x:Key="Msg.ImportConflictDetected">检测到导入冲突。
+
+文件记录总数：{0}
+可直接导入：{1}
+冲突记录：{2}
+
+选择"是"：保留本地冲突记录，仅导入非冲突数据（推荐）
+选择"否"：使用导入文件覆盖冲突记录
+选择"取消"：不导入</sys:String>
+    <sys:String x:Key="Msg.ImportComplete">导入完成。
+新增记录：{0}
+{1}
+文件记录总数：{2}
+
+导入记录的原始分类快照已保留。</sys:String>
+    <sys:String x:Key="Msg.ImportUsageData">导入时迹数据</sys:String>
+    <sys:String x:Key="Msg.ImportSettingsDsg">导入时迹配置</sys:String>
+    <sys:String x:Key="Msg.ImportFullBackup">导入完整备份</sys:String>
+
+    <!-- Sessions code-behind -->
+    <sys:String x:Key="Sessions.SelectedNone">已选 0 项</sys:String>
+    <sys:String x:Key="Sessions.Selected">已选：{0} 项</sys:String>
+
+    <!-- TimeDist code-behind -->
+    <sys:String x:Key="TimeDist.UsageDurationDistribution">使用时长分布</sys:String>
+
+</ResourceDictionary>

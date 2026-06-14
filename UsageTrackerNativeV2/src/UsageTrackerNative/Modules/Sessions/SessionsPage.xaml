@@ -234,6 +234,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -247,10 +248,10 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel>
-                <TextBlock Text="使用明细" FontSize="34" FontWeight="Black" />
+                <TextBlock Text="{DynamicResource Sessions.Title}" FontSize="34" FontWeight="Black" />
             </StackPanel>
             <Border Grid.Row="0" Grid.Column="1" Background="{DynamicResource PanelBrushAlt}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="18" Padding="16,10" VerticalAlignment="Top">
-                <TextBlock x:Name="ActiveSessionText" Text="当前活跃：等待接入追踪服务" FontWeight="Black" />
+                <TextBlock x:Name="ActiveSessionText" Text="{DynamicResource Sessions.ActiveSession}" FontWeight="Black" />
             </Border>
             <Border x:Name="PreviewModeBanner" Grid.Row="1" Grid.ColumnSpan="2" Margin="0,14,0,0" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource InputFocusBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="14,10" Visibility="Collapsed">
                 <Grid>
@@ -259,7 +260,7 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock x:Name="PreviewModeText" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" />
-                    <Button Grid.Column="1" Content="退出仅查看" Height="30" MinWidth="92" Margin="14,0,0,0" Click="ExitPreviewModeButton_Click" />
+                    <Button Grid.Column="1" Content="{DynamicResource Sessions.ExitPreview}" Height="30" MinWidth="92" Margin="14,0,0,0" Click="ExitPreviewModeButton_Click" />
                 </Grid>
             </Border>
         </Grid>
@@ -273,7 +274,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="SearchTextBox" Height="38" VerticalContentAlignment="Center" Text="搜索进程 / 标题 / 分类" Foreground="{DynamicResource SecondaryTextBrush}" KeyDown="SearchTextBox_KeyDown" GotFocus="SearchTextBox_GotFocus" />
+                <TextBox x:Name="SearchTextBox" Height="38" VerticalContentAlignment="Center" Text="{DynamicResource Sessions.SearchPlaceholder}" Foreground="{DynamicResource SecondaryTextBrush}" KeyDown="SearchTextBox_KeyDown" GotFocus="SearchTextBox_GotFocus" />
                 <Grid Grid.Column="1" x:Name="SearchModeHost" Width="138" Height="38" Margin="10,0,0,0" Panel.ZIndex="40" MouseRightButtonUp="SearchModeHost_MouseRightButtonUp">
                     <Border x:Name="SearchModeButtonBorder" Style="{StaticResource SearchModeButtonBorderStyle}" FocusVisualStyle="{x:Null}" Focusable="False" MouseLeftButtonDown="SearchModeButton_MouseLeftButtonDown" PreviewMouseLeftButtonUp="SearchModeButton_PreviewMouseLeftButtonUp" MouseLeave="SearchModeButton_MouseLeave">
                         <Grid>
@@ -281,7 +282,7 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="30" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="SearchButtonText" Text="全盘查找" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" Cursor="Hand" MouseLeftButtonUp="SearchButtonText_MouseLeftButtonUp" />
+                            <TextBlock x:Name="SearchButtonText" Text="{DynamicResource Sessions.SearchAll}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" Cursor="Hand" MouseLeftButtonUp="SearchButtonText_MouseLeftButtonUp" />
                             <Border Grid.Column="1" Background="Transparent" Cursor="Hand" MouseLeftButtonUp="SearchModeDropDown_MouseLeftButtonUp">
                                 <TextBlock Text="▾" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Black" Foreground="{DynamicResource SecondaryTextBrush}" />
                             </Border>
@@ -294,16 +295,16 @@
                             </Border.RenderTransform>
                             <StackPanel>
                                 <Border Style="{StaticResource SearchModeItemStyle}" Tag="All" MouseLeftButtonUp="SearchModeItem_MouseLeftButtonUp">
-                                    <TextBlock x:Name="AllSearchModeText" Text="全盘查找" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="AllSearchModeText" Text="{DynamicResource Sessions.SearchAll}" FontWeight="SemiBold" />
                                 </Border>
                                 <Border Style="{StaticResource SearchModeItemStyle}" Tag="Subject" MouseLeftButtonUp="SearchModeItem_MouseLeftButtonUp">
-                                    <TextBlock x:Name="SubjectSearchModeText" Text="分类查找" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="SubjectSearchModeText" Text="{DynamicResource Sessions.SearchSubject}" FontWeight="SemiBold" />
                                 </Border>
                                 <Border Style="{StaticResource SearchModeItemStyle}" Tag="Title" MouseLeftButtonUp="SearchModeItem_MouseLeftButtonUp">
-                                    <TextBlock x:Name="TitleSearchModeText" Text="标题查找" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="TitleSearchModeText" Text="{DynamicResource Sessions.SearchTitle}" FontWeight="SemiBold" />
                                 </Border>
                                 <Border Style="{StaticResource SearchModeItemStyle}" Tag="Process" MouseLeftButtonUp="SearchModeItem_MouseLeftButtonUp">
-                                    <TextBlock x:Name="ProcessSearchModeText" Text="进程查找" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="ProcessSearchModeText" Text="{DynamicResource Sessions.SearchProcess}" FontWeight="SemiBold" />
                                 </Border>
                             </StackPanel>
                         </Border>
@@ -311,22 +312,26 @@
                 </Grid>
                 <Button Grid.Column="2" x:Name="SubjectScopeButton" Style="{StaticResource SubjectScopeButtonStyle}" MinWidth="118" Height="40" Padding="14,0" Margin="10,0,0,0" Click="SubjectScopeButton_Click">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock x:Name="TodayScopeText" Text="当日" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <TextBlock x:Name="TodayScopeText" Text="{DynamicResource Sessions.ScopeToday}" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" />
                         <TextBlock Text="/" FontSize="15" FontWeight="SemiBold" Margin="2,0" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" />
-                        <TextBlock x:Name="HistoryScopeText" Text="历史" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <TextBlock x:Name="HistoryScopeText" Text="{DynamicResource Sessions.ScopeHistory}" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
-                <Button Grid.Column="3" x:Name="UndoButton" Content="撤销" MinWidth="74" Height="38" Margin="10,0,0,0" Click="UndoButton_Click" />
+                <Button Grid.Column="3" x:Name="UndoButton" Content="{DynamicResource Sessions.Undo}" MinWidth="74" Height="38" Margin="10,0,0,0" Click="UndoButton_Click" />
                 <Border Grid.Column="4" Background="{DynamicResource InputBackgroundBrush}" CornerRadius="12" Padding="14,0" Margin="10,0,0,0">
                     <StackPanel Orientation="Horizontal">
-                        <Button x:Name="DeleteSelectedButton" Content="删除" Height="30" MinWidth="58" Margin="0,4,10,4" Click="DeleteSelectedButton_Click" />
-                        <TextBlock x:Name="SelectedCountText" Text="已选 0 项" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <Button x:Name="DeleteSelectedButton" Content="{DynamicResource Sessions.Delete}" Height="30" MinWidth="58" Margin="0,4,10,4" Click="DeleteSelectedButton_Click" />
+                        <TextBlock x:Name="SelectedCountText" Text="{DynamicResource Sessions.SelectedCount}" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}" />
                     </StackPanel>
                 </Border>
             </Grid>
         </Border>
 
-        <Border Grid.Row="2" Background="{DynamicResource PanelBrushAlt}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="22" Padding="0">
+        <Border x:Name="SearchSummaryPanel" Grid.Row="2" Background="{DynamicResource ButtonBackgroundBrush}" BorderBrush="{DynamicResource ButtonBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="14,8" Margin="0,0,0,12" Visibility="Collapsed">
+            <TextBlock x:Name="SearchSummaryText" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" />
+        </Border>
+
+        <Border Grid.Row="3" Background="{DynamicResource PanelBrushAlt}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="22" Padding="0">
             <Grid>
                         <DataGrid x:Name="SessionsGrid"
                           AutoGenerateColumns="False"
@@ -374,7 +379,7 @@
                                         </Style>
                                     </Border.Style>
                                     <StackPanel>
-                                        <TextBlock Text="并行活动（不计入主使用时长）" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}" />
+                                        <TextBlock Text="{DynamicResource Sessions.ParallelActivity}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource SecondaryTextBrush}" />
                                         <ItemsControl ItemsSource="{Binding ParallelActivities}" Margin="0,6,0,0">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
@@ -394,14 +399,14 @@
                             </DataTemplate>
                         </DataGrid.RowDetailsTemplate>
                         <DataGrid.Columns>
-                            <DataGridTemplateColumn Header="进程" Width="180" HeaderStyle="{StaticResource SessionGridHeaderLeftStyle}" CellStyle="{StaticResource SessionGridLeftCellStyle}">
+                            <DataGridTemplateColumn Header="{DynamicResource Sessions.Column.Process}" Width="180" HeaderStyle="{StaticResource SessionGridHeaderLeftStyle}" CellStyle="{StaticResource SessionGridLeftCellStyle}">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding ProcessName}" Style="{StaticResource SessionGridLeftTextStyle}" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="窗口标题" Width="*" HeaderStyle="{StaticResource SessionGridHeaderLeftStyle}" CellStyle="{StaticResource SessionGridLeftCellStyle}">
+                            <DataGridTemplateColumn Header="{DynamicResource Sessions.Column.WindowTitle}" Width="*" HeaderStyle="{StaticResource SessionGridHeaderLeftStyle}" CellStyle="{StaticResource SessionGridLeftCellStyle}">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -417,13 +422,13 @@
                                                         </Style.Triggers>
                                                     </Style>
                                                 </Border.Style>
-                                                <TextBlock Text="并行" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AccentRedBrush}" />
+                                                <TextBlock Text="{DynamicResource Sessions.ParallelLabel}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AccentRedBrush}" />
                                             </Border>
                                         </StackPanel>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="分类" Width="160" HeaderStyle="{StaticResource SessionGridHeaderCenterStyle}" CellStyle="{StaticResource SessionGridCenterCellStyle}">
+                            <DataGridTemplateColumn Header="{DynamicResource Sessions.Column.Subject}" Width="160" HeaderStyle="{StaticResource SessionGridHeaderCenterStyle}" CellStyle="{StaticResource SessionGridCenterCellStyle}">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <Border Background="{DynamicResource SessionSubjectTagBackgroundBrush}" CornerRadius="4" Padding="8,2" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -432,21 +437,21 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="开始时间" Width="140" HeaderStyle="{StaticResource SessionGridHeaderRightStyle}" CellStyle="{StaticResource SessionGridRightCellStyle}">
+                            <DataGridTemplateColumn Header="{DynamicResource Sessions.Column.StartTime}" Width="140" HeaderStyle="{StaticResource SessionGridHeaderRightStyle}" CellStyle="{StaticResource SessionGridRightCellStyle}">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding StartText}" Style="{StaticResource SessionGridRightMonoTextStyle}" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="结束时间" Width="140" HeaderStyle="{StaticResource SessionGridHeaderRightStyle}" CellStyle="{StaticResource SessionGridRightCellStyle}">
+                            <DataGridTemplateColumn Header="{DynamicResource Sessions.Column.EndTime}" Width="140" HeaderStyle="{StaticResource SessionGridHeaderRightStyle}" CellStyle="{StaticResource SessionGridRightCellStyle}">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding EndText}" Style="{StaticResource SessionGridRightMonoTextStyle}" />
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="时长" Width="90" HeaderStyle="{StaticResource SessionGridHeaderRightStyle}" CellStyle="{StaticResource SessionGridRightCellStyle}">
+                            <DataGridTemplateColumn Header="{DynamicResource Sessions.Column.Duration}" Width="90" HeaderStyle="{StaticResource SessionGridHeaderRightStyle}" CellStyle="{StaticResource SessionGridRightCellStyle}">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding DurationText}" Style="{StaticResource SessionGridDurationTextStyle}" />
@@ -456,7 +461,7 @@
                         </DataGrid.Columns>
                 </DataGrid>
                 <TextBlock x:Name="EmptyHintText"
-                           Text="当天暂无会话记录"
+                           Text="{DynamicResource Sessions.NoSession}"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource SecondaryTextBrush}"

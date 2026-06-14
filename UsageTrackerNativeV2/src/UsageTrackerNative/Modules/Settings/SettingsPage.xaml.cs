@@ -80,9 +80,12 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
     private void RefreshRuntimeSettings()
     {
-        StartupStateText.Text = _context.TrackerService.IsStartWithWindowsEnabled() ? "开启" : "关闭";
+        StartupStateText.Text = _context.TrackerService.IsStartWithWindowsEnabled()
+            ? LocalizationService.Instance.Get("Settings.Enabled")
+            : LocalizationService.Instance.Get("Settings.Disabled");
         IdleTimeoutInput.Text = _context.TrackerService.IdleTimeoutMinutes.ToString();
         ManualIdleShortcutInput.Text = _context.TrackerService.ManualIdleShortcutText;
+        RefreshLanguageButtons(_context.TrackerService.Language);
         var accentColor = _context.TrackerService.ThemeAccentColor;
         UpdateAccentStateFromHex(accentColor);
         _previewAccentColor = accentColor;
@@ -92,6 +95,58 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         UpdateAccentThumbs();
         RefreshAccentSlotButtons();
         StatusText.Text = _lastStatus;
+    }
+
+    private void RefreshLanguageButtons(string language)
+    {
+        var isEn = string.Equals(language, "en", StringComparison.OrdinalIgnoreCase);
+        SetLangButtonActive(LangZhButton, LangZhText, !isEn);
+        SetLangButtonActive(LangEnButton, LangEnText, isEn);
+    }
+
+    private void SetLangButtonActive(System.Windows.Controls.Border button, System.Windows.Controls.TextBlock label, bool active)
+    {
+        if (active)
+        {
+            button.Background = (System.Windows.Media.Brush)System.Windows.Application.Current.Resources["AccentRedBrush"];
+            button.BorderBrush = (System.Windows.Media.Brush)System.Windows.Application.Current.Resources["AccentRedBrush"];
+            label.Foreground = System.Windows.Media.Brushes.White;
+        }
+        else
+        {
+            button.Background = (System.Windows.Media.Brush)System.Windows.Application.Current.Resources["ButtonBackgroundBrush"];
+            button.BorderBrush = (System.Windows.Media.Brush)System.Windows.Application.Current.Resources["ButtonBorderBrush"];
+            label.Foreground = (System.Windows.Media.Brush)System.Windows.Application.Current.Resources["PrimaryTextBrush"];
+        }
+    }
+
+    private void LangZhButton_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        _context.TrackerService.SetLanguage("zh");
+        LocalizationService.Instance.SetLanguage("zh-CN");
+        RefreshLanguageButtons("zh");
+        RefreshRuntimeSettings();
+        SetStatus("语言已切换为中文。");
+    }
+
+    private void LangEnButton_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        _context.TrackerService.SetLanguage("en");
+        LocalizationService.Instance.SetLanguage("en-US");
+        RefreshLanguageButtons("en");
+        RefreshRuntimeSettings();
+        SetStatus("Language switched to English.");
+    }
+
+    private void SystemSettingsScroll_PreviewMouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        if (sender is System.Windows.Controls.ScrollViewer sv)
+        {
+            sv.ScrollToVerticalOffset(sv.VerticalOffset - e.Delta / 3.0);
+            e.Handled = true;
+        }
     }
 
     private void StartupRow_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)

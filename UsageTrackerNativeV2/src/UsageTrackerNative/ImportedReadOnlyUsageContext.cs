@@ -138,35 +138,7 @@ public sealed class ImportedReadOnlyUsageContext
 
     private string? ResolveSubject(string processName, string windowTitle)
     {
-        foreach (var definition in _subjectDefinitions)
-        {
-            foreach (var parent in definition.Parents)
-            {
-                foreach (var child in parent.Children)
-                {
-                    if (MatchesSubjectRule(child, processName, windowTitle))
-                    {
-                        return child;
-                    }
-                }
-                if (MatchesSubjectRule(parent.Name, processName, windowTitle))
-                {
-                    return parent.Name;
-                }
-            }
-            if (MatchesSubjectRule(definition.Name, processName, windowTitle))
-            {
-                return definition.Name;
-            }
-        }
-        return null;
-    }
-
-    private bool MatchesSubjectRule(string subject, string processName, string windowTitle)
-    {
-        return _subjectKeywordRules.TryGetValue(subject, out var keywords)
-            && keywords.Any(keyword => SearchExpressionMatcher.IsMatch(keyword, term => processName.Contains(term, StringComparison.OrdinalIgnoreCase)
-                || windowTitle.Contains(term, StringComparison.OrdinalIgnoreCase)));
+        return SearchExpressionMatcher.ResolveSubjectByKeywordRules(_subjectDefinitions, _subjectKeywordRules, processName, windowTitle);
     }
 
     private static UsageSession ToUsageSession(UsageSessionRecord record)

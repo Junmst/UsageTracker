@@ -44,14 +44,14 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel>
-                <TextBlock Text="时长分布" FontSize="34" FontWeight="Black" />
+                <TextBlock Text="{DynamicResource TimeDist.Title}" FontSize="34" FontWeight="Black" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
                 <Border x:Name="SevenDaysButton" Style="{StaticResource DistributionFilterButtonStyle}" Height="40" MinWidth="96" Cursor="Hand" MouseLeftButtonUp="SevenDaysButton_Click" MouseEnter="DistributionFilterButton_MouseEnter" MouseLeftButtonDown="DistributionFilterButton_MouseLeftButtonDown" PreviewMouseLeftButtonUp="DistributionFilterButton_MouseLeftButtonUp" MouseLeave="DistributionFilterButton_MouseLeave">
-                    <TextBlock Text="最近七天" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                    <TextBlock Text="{DynamicResource TimeDist.Recent7Days}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" />
                 </Border>
                 <Border x:Name="MonthButton" Style="{StaticResource DistributionFilterButtonStyle}" Height="40" MinWidth="86" Margin="10,0,0,0" Cursor="Hand" MouseLeftButtonUp="MonthButton_Click" MouseEnter="DistributionFilterButton_MouseEnter" MouseLeftButtonDown="DistributionFilterButton_MouseLeftButtonDown" PreviewMouseLeftButtonUp="DistributionFilterButton_MouseLeftButtonUp" MouseLeave="DistributionFilterButton_MouseLeave">
-                    <TextBlock Text="月视图" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" />
+                    <TextBlock Text="{DynamicResource TimeDist.MonthView}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" />
                 </Border>
                 <Grid x:Name="SubjectFilterHost" Width="142" Height="40" Margin="10,0,0,0" Panel.ZIndex="40" MouseRightButtonUp="SubjectFilterHost_MouseRightButtonUp" MouseEnter="SubjectFilterMenuArea_MouseEnter" MouseLeave="SubjectFilterMenuArea_MouseLeave">
                     <Border x:Name="SubjectFilterButtonBorder" Style="{StaticResource DistributionFilterButtonStyle}" MouseEnter="DistributionFilterButton_MouseEnter" MouseLeftButtonDown="DistributionFilterButton_MouseLeftButtonDown" PreviewMouseLeftButtonUp="DistributionFilterButton_MouseLeftButtonUp" MouseLeave="DistributionFilterButton_MouseLeave">
@@ -60,7 +60,7 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="30" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="SubjectFilterButtonText" Text="全部分类" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource PrimaryTextBrush}" Cursor="Hand" MouseLeftButtonUp="SubjectFilterButtonText_MouseLeftButtonUp" />
+                            <TextBlock x:Name="SubjectFilterButtonText" Text="{DynamicResource TimeDist.AllSubjectsFilter}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource PrimaryTextBrush}" Cursor="Hand" MouseLeftButtonUp="SubjectFilterButtonText_MouseLeftButtonUp" />
                             <Border Grid.Column="1" Background="Transparent" Cursor="Hand" MouseLeftButtonUp="SubjectFilterDropDown_MouseLeftButtonUp">
                                 <TextBlock Text="▾" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Black" Foreground="{DynamicResource SecondaryTextBrush}" />
                             </Border>
@@ -89,10 +89,10 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock x:Name="SelectedSessionTitleText" Text="未选择会话" FontSize="18" FontWeight="Black" />
+                    <TextBlock x:Name="SelectedSessionTitleText" Text="{DynamicResource TimeDist.NoSelection}" FontSize="18" FontWeight="Black" />
                     <TextBlock x:Name="SelectedSessionMetaText" Margin="0,6,0,0" Foreground="{DynamicResource SecondaryTextBrush}" />
                 </StackPanel>
-                <Button Grid.Column="1" Content="查看完整明细" Height="40" MinWidth="116" Click="ViewDetailsButton_Click" />
+                <Button Grid.Column="1" Content="{DynamicResource TimeDist.ViewDetails}" Height="40" MinWidth="116" Click="ViewDetailsButton_Click" />
             </Grid>
         </Border>
     </Grid>

@@ -23,6 +23,8 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
     private UsageSession? _selectionAnchorSession;
     private Point _selectionStartPoint;
     private Rect _selectionRect;
+    private DateTime? _localSelectedDate;
+    private int _refreshVersion;
     private HashSet<UsageSession> _selectionAnchor = new(ReferenceEqualityComparer.Instance);
     private bool _selectionRectUpdateQueued;
     private Rect _pendingSelectionRect;
@@ -35,7 +37,6 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
     private string? _pendingHighlightSessionId;
     private SessionNavigationTarget? _pendingNavigationTarget;
     private UsageSession? _highlightedSession;
-    private int _highlightVersion;
     private const double SubjectScopeInactiveFontSize = 13.5d;
     private const double SubjectScopeActiveFontSize = 15.3d;
     private static readonly Duration SubjectScopeAnimationDuration = new(TimeSpan.FromMilliseconds(240));
@@ -86,6 +87,12 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
     {
         AttachSearchModeWindowHandlers();
         BuildSessionContextMenu();
+        _sessionsScrollViewer ??= FindVisualChild<ScrollViewer>(SessionsGrid);
+        if (_sessionsScrollViewer is not null)
+        {
+            _sessionsScrollViewer.ScrollChanged -= SessionsScrollViewer_ScrollChanged;
+            _sessionsScrollViewer.ScrollChanged += SessionsScrollViewer_ScrollChanged;
+        }
         await RefreshAsync(force: true);
     }
 
@@ -117,6 +124,11 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
 
     private async void Context_SelectedDateChanged(object? sender, EventArgs e)
     {
+        if (_pendingNavigationTarget is not null)
+        {
+            return;
+        }
+        _localSelectedDate = null;
         _searchAllHistory = false;
         _subjectScopeAllHistory = false;
         UpdateSubjectScopeButtonText(animate: false);
@@ -174,8 +186,10 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
 
     private async Task RefreshAsync(bool force = false)
     {
+        var refreshVersion = System.Threading.Interlocked.Increment(ref _refreshVersion);
         await _context.Initialization;
         UpdatePreviewModeVisuals();
+        var effectiveDate = EffectiveSelectedDate;
         var query = SearchTextBox.Text?.Trim();
         if (string.Equals(query, SearchPlaceholder, StringComparison.OrdinalIgnoreCase))
         {
@@ -185,12 +199,12 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
         IReadOnlyList<UsageSessionRecord> records;
         if (_context.IsPreviewMode)
         {
-            var earliest = _context.EarliestSessionDate ?? _context.SelectedDate;
+            var earliest = _context.EarliestSessionDate ?? effectiveDate;
             records = await _context.QuerySessionsInRangeAsync(earliest.Date, DateTime.MaxValue.Date);
         }
         else if (_searchAllHistory)
         {
-            var earliest = _context.EarliestSessionDate ?? _context.SelectedDate;
+            var earliest = _context.EarliestSessionDate ?? effectiveDate;
             var rangeStart = earliest.Date;
             var rangeEnd = DateTime.Today.AddDays(1);
             if (_pendingNavigationTarget is not null && _pendingNavigationTarget.StartTime != DateTime.MinValue)
@@ -208,7 +222,7 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
         }
         else
         {
-            records = await _context.QuerySessionsByDateAsync(_context.SelectedDate);
+            records = await _context.QuerySessionsByDateAsync(effectiveDate);
         }
 
         var subjectSearchLookup = BuildSubjectSearchLookup();
@@ -218,7 +232,29 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
             .OrderByDescending(x => x.StartTime)
             .ToList();
 
-        if (!_context.IsPreviewMode && !_searchAllHistory && _context.SelectedDate.Date == DateTime.Today && _context.ActiveSession is { } activeSession)
+        if (_pendingNavigationTarget is { } navigationTarget && FindNavigationTargetIn(items, navigationTarget) is null)
+        {
+            var lookupStart = navigationTarget.StartTime == DateTime.MinValue
+                ? effectiveDate.Date.AddHours(4)
+                : navigationTarget.StartTime.AddMinutes(-5);
+            var lookupEnd = navigationTarget.EndTime == DateTime.MinValue
+                ? lookupStart.AddDays(1)
+                : navigationTarget.EndTime.AddMinutes(5);
+            var targetRecords = await _context.QuerySessionsInRangeAsync(lookupStart, lookupEnd);
+            var targetItem = FindNavigationTargetIn(targetRecords.Select(ToUsageSession), navigationTarget);
+            if (targetItem is not null && !items.Any(x => string.Equals(x.Id, targetItem.Id, StringComparison.OrdinalIgnoreCase)))
+            {
+                items.Add(targetItem);
+                items = items.OrderByDescending(x => x.StartTime).ToList();
+            }
+        }
+
+        if (refreshVersion != _refreshVersion)
+        {
+            return;
+        }
+
+        if (!_context.IsPreviewMode && !_searchAllHistory && effectiveDate.Date == DateTime.Today && _context.ActiveSession is { } activeSession)
         {
             var activeMatches = MatchesSessionSearch(activeSession, query ?? string.Empty, _searchMode, subjectSearchLookup);
             if (activeMatches && !items.Any(x => string.Equals(x.Id, activeSession.Id, StringComparison.OrdinalIgnoreCase)))
@@ -227,10 +263,11 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
             }
         }
 
-        // 数据不变则跳过 UI 重建，避免闪烁
-        var hash = string.Join('|', items.Take(200).Select(x => $"{x.Id}:{x.ManualSubject}:{x.HasParallelActivities}:{x.ParallelSummaryText}"));
+        var hash = string.Join('|', items.Take(200).Select(x => $"{x.Id}:{x.StartTime.Ticks}:{x.EndTime.Ticks}:{x.ManualSubject}:{x.HasParallelActivities}:{x.ParallelSummaryText}"));
         if (force || hash != _lastSessionsHash)
         {
+            var selectedSessionIds = GetSelectedSessionIds();
+            var selectionAnchorSessionId = _selectionAnchorSession?.Id;
             _lastSessionsHash = hash;
             SessionsGrid.ItemsSource = null;
             _sessions.Clear();
@@ -239,9 +276,8 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
                 _sessions.Add(item);
             }
             SessionsGrid.ItemsSource = _sessions;
-            _selectionAnchorSession = null;
             _pressedSession = null;
-            _selectionAnchor.Clear();
+            RestoreSelectionAfterRebuild(selectedSessionIds, selectionAnchorSessionId);
             RestoreHighlightAfterRebuild();
         }
 
@@ -249,9 +285,24 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
         ActiveSessionText.Text = active is null
             ? "当前活跃：空闲"
             : $"当前活跃：{active.ProcessName} · {active.DurationText}";
+        UpdateSearchSummary(query ?? string.Empty, items);
         EmptyHintText.Visibility = items.Count == 0 ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
         RefreshSelectionSummary();
         ApplyPendingHighlightIfNeeded();
+    }
+
+    private void UpdateSearchSummary(string query, IReadOnlyCollection<UsageSession> items)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            SearchSummaryPanel.Visibility = System.Windows.Visibility.Collapsed;
+            SearchSummaryText.Text = string.Empty;
+            return;
+        }
+
+        var totalDuration = TimeSpan.FromTicks(items.Sum(x => x.Duration.Ticks));
+        SearchSummaryText.Text = $"查找结果：{items.Count} 个会话 · 总时长 {Shell.DurationFormatter.Format(totalDuration)}";
+        SearchSummaryPanel.Visibility = System.Windows.Visibility.Visible;
     }
 
     public void ApplyNavigationTarget(string targetId)
@@ -263,13 +314,24 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
 
         _pendingNavigationTarget = SessionNavigationTarget.Parse(targetId);
         _pendingHighlightSessionId = _pendingNavigationTarget?.Id ?? targetId;
-        _searchAllHistory = true;
+        if (_pendingNavigationTarget is { } target && target.StartTime != DateTime.MinValue)
+        {
+            _localSelectedDate = target.DisplayDate == DateTime.MinValue
+                ? Shell.V2AppContext.NormalizeToDateBoundary(target.StartTime)
+                : target.DisplayDate;
+        }
+        _searchAllHistory = false;
         _searchMode = SessionSearchMode.All;
         SearchTextBox.Text = SearchPlaceholder;
         SearchTextBox.SetResourceReference(System.Windows.Controls.TextBox.ForegroundProperty, "SecondaryTextBrush");
         UpdateSearchButtonText();
-        _ = RefreshAsync(force: true);
+        if (IsLoaded)
+        {
+            _ = RefreshAsync(force: true);
+        }
     }
+
+    private DateTime EffectiveSelectedDate => _localSelectedDate ?? _context.SelectedDate;
 
     private static UsageSession ToUsageSession(UsageSessionRecord record)
     {
@@ -1030,13 +1092,14 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
         }
 
         var affected = selectedSessions.Select(x => (Session: x, PreviousSubject: x.ManualSubject)).ToList();
+        var targetDate = EffectiveSelectedDate;
         foreach (var session in selectedSessions)
         {
             session.ManualSubject = manualSubject;
-            _context.TrackerService.SetManualSubjectScope(session, manualSubject, _subjectScopeAllHistory ? null : _context.SelectedDate);
+            _context.TrackerService.SetManualSubjectScope(session, manualSubject, _subjectScopeAllHistory ? null : targetDate);
         }
 
-        var undoDate = _subjectScopeAllHistory ? (DateTime?)null : _context.SelectedDate;
+        var undoDate = _subjectScopeAllHistory ? (DateTime?)null : targetDate;
         var undoAffected = affected
             .Select(item => (item.Session, item.PreviousSubject))
             .ToList();
@@ -1243,6 +1306,35 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
         SelectedCountText.Text = $"已选 {SessionsGrid.SelectedItems.Count} 项";
     }
 
+    private HashSet<string> GetSelectedSessionIds()
+    {
+        return SessionsGrid.SelectedItems
+            .OfType<UsageSession>()
+            .Select(x => x.Id)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void RestoreSelectionAfterRebuild(HashSet<string> selectedSessionIds, string? selectionAnchorSessionId)
+    {
+        _selectionAnchor.Clear();
+        _selectionAnchorSession = null;
+        if (selectedSessionIds.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var session in _sessions.Where(x => selectedSessionIds.Contains(x.Id)))
+        {
+            SessionsGrid.SelectedItems.Add(session);
+            _selectionAnchor.Add(session);
+            if (selectionAnchorSessionId is not null && string.Equals(session.Id, selectionAnchorSessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                _selectionAnchorSession = session;
+            }
+        }
+    }
+
     private void ApplyPendingHighlightIfNeeded()
     {
         if (string.IsNullOrWhiteSpace(_pendingHighlightSessionId) && _pendingNavigationTarget is null)
@@ -1278,10 +1370,65 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
             return null;
         }
 
-        return _sessions.FirstOrDefault(x =>
+        return FindNavigationTargetIn(_sessions, target);
+    }
+
+    private static UsageSession? FindNavigationTargetIn(IEnumerable<UsageSession> sessions, SessionNavigationTarget target)
+    {
+        var sessionList = sessions as IReadOnlyCollection<UsageSession> ?? sessions.ToList();
+        if (!string.IsNullOrWhiteSpace(target.Id))
+        {
+            var byId = sessionList.FirstOrDefault(x => string.Equals(x.Id, target.Id, StringComparison.OrdinalIgnoreCase));
+            if (byId is not null)
+            {
+                return byId;
+            }
+        }
+
+        if (target.EndTime != DateTime.MinValue)
+        {
+            var byRange = sessionList.FirstOrDefault(x =>
+                string.Equals(x.ProcessName, target.ProcessName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(x.WindowTitle, target.WindowTitle, StringComparison.OrdinalIgnoreCase)
+                && Math.Abs((x.StartTime - target.StartTime).TotalSeconds) < 3.0d
+                && Math.Abs((x.EndTime - target.EndTime).TotalSeconds) < 3.0d);
+            if (byRange is not null)
+            {
+                return byRange;
+            }
+        }
+
+        var byContainingStart = sessionList.FirstOrDefault(x =>
             string.Equals(x.ProcessName, target.ProcessName, StringComparison.OrdinalIgnoreCase)
             && string.Equals(x.WindowTitle, target.WindowTitle, StringComparison.OrdinalIgnoreCase)
-            && Math.Abs((x.StartTime - target.StartTime).TotalSeconds) < 1.0d);
+            && x.StartTime <= target.StartTime.AddSeconds(3)
+            && x.EndTime >= target.StartTime.AddSeconds(-3));
+        if (byContainingStart is not null)
+        {
+            return byContainingStart;
+        }
+
+        var candidates = sessionList
+            .Select(x => new { Session = x, DeltaSeconds = Math.Abs((x.StartTime - target.StartTime).TotalSeconds) })
+            .Where(x => x.DeltaSeconds < 10.0d)
+            .OrderBy(x => x.DeltaSeconds)
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var exact = candidates.FirstOrDefault(x =>
+            string.Equals(x.Session.ProcessName, target.ProcessName, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Session.WindowTitle, target.WindowTitle, StringComparison.OrdinalIgnoreCase));
+        if (exact is not null)
+        {
+            return exact.Session;
+        }
+
+        var processMatch = candidates.FirstOrDefault(x =>
+            string.Equals(x.Session.ProcessName, target.ProcessName, StringComparison.OrdinalIgnoreCase));
+        return (processMatch ?? candidates[0]).Session;
     }
 
     private void RestoreHighlightAfterRebuild()
@@ -1315,42 +1462,94 @@ public partial class SessionsPage : System.Windows.Controls.UserControl, Shell.I
         SessionsGrid.SelectedItems.Clear();
         SessionsGrid.SelectedItem = target;
         SessionsGrid.CurrentItem = target;
+        ScrollToSessionIndex(target);
         SessionsGrid.ScrollIntoView(target);
+        if (_sessionsScrollViewer is not null)
+        {
+            ResetSmoothScrollState(_sessionsScrollViewer);
+        }
         _ = Dispatcher.InvokeAsync(() =>
         {
             SessionsGrid.UpdateLayout();
+            ScrollToSessionIndex(target);
             SessionsGrid.ScrollIntoView(target);
+            if (SessionsGrid.ItemContainerGenerator.ContainerFromItem(target) is DataGridRow row)
+            {
+                row.BringIntoView();
+                row.IsSelected = true;
+                row.Focus();
+            }
+            if (_sessionsScrollViewer is not null)
+            {
+                ResetSmoothScrollState(_sessionsScrollViewer);
+            }
         }, System.Windows.Threading.DispatcherPriority.Background);
-        var version = ++_highlightVersion;
         _ = Dispatcher.InvokeAsync(async () =>
         {
-            await Task.Delay(2600);
-            if (version == _highlightVersion && ReferenceEquals(_highlightedSession, target))
+            foreach (var delay in new[] { 80, 160, 320, 640 })
             {
-                target.IsHighlighted = false;
-                _highlightedSession = null;
+                await Task.Delay(delay);
+                SessionsGrid.UpdateLayout();
+                ScrollToSessionIndex(target);
+                SessionsGrid.ScrollIntoView(target);
+                if (SessionsGrid.ItemContainerGenerator.ContainerFromItem(target) is DataGridRow row)
+                {
+                    row.BringIntoView();
+                    row.IsSelected = true;
+                    row.Focus();
+                }
+                if (_sessionsScrollViewer is not null)
+                {
+                    ResetSmoothScrollState(_sessionsScrollViewer);
+                }
             }
-        });
+        }, System.Windows.Threading.DispatcherPriority.ContextIdle);
+    }
+
+    private void ScrollToSessionIndex(UsageSession target)
+    {
+        if (_sessionsScrollViewer is null)
+        {
+            return;
+        }
+
+        var index = _sessions.IndexOf(target);
+        if (index < 0)
+        {
+            return;
+        }
+
+        var offset = Math.Max(0, index * SessionsGrid.RowHeight - SessionsGrid.ActualHeight * 0.35);
+        _sessionsScrollViewer.ScrollToVerticalOffset(offset);
     }
 
 
-    private sealed record SessionNavigationTarget(string? Id, string ProcessName, string WindowTitle, DateTime StartTime)
+    private sealed record SessionNavigationTarget(string? Id, string ProcessName, string WindowTitle, DateTime StartTime, DateTime EndTime, DateTime DisplayDate)
     {
         public static SessionNavigationTarget? Parse(string raw)
         {
             var parts = raw.Split('|');
             if (parts.Length < 4 || !long.TryParse(parts[3], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var ticks))
             {
-                return string.IsNullOrWhiteSpace(raw) ? null : new SessionNavigationTarget(raw, string.Empty, string.Empty, DateTime.MinValue);
+                return string.IsNullOrWhiteSpace(raw) ? null : new SessionNavigationTarget(raw, string.Empty, string.Empty, DateTime.MinValue, DateTime.MinValue, DateTime.MinValue);
             }
 
             static string Unescape(string value) => Uri.UnescapeDataString(value);
             var id = Unescape(parts[0]);
+            var startTime = new DateTime(ticks);
+            var endTime = parts.Length >= 5 && long.TryParse(parts[4], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var endTicks)
+                ? new DateTime(endTicks)
+                : DateTime.MinValue;
+            var displayDate = parts.Length >= 6 && long.TryParse(parts[5], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var displayDateTicks)
+                ? new DateTime(displayDateTicks)
+                : Shell.V2AppContext.NormalizeToDateBoundary(startTime);
             return new SessionNavigationTarget(
                 string.IsNullOrWhiteSpace(id) ? null : id,
                 Unescape(parts[1]),
                 Unescape(parts[2]),
-                new DateTime(ticks));
+                startTime,
+                endTime,
+                displayDate);
         }
     }
 

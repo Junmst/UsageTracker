@@ -90,20 +90,20 @@ public partial class OverviewPage : System.Windows.Controls.UserControl
         else
         {
             SelectedDateStatusText.Text = _context.IsPreviewMode
-                ? "当前查看：导入包内存数据（仅查看）"
+                ? LocalizationService.Instance.Get("Overview.ViewingPreview")
                 : _context.IsInitialized
                     ? selectedDate.Date == DateTime.Today
-                        ? "当前查看：今天（含实时更新）"
+                        ? LocalizationService.Instance.Get("Overview.ViewingToday")
                         : selectedDate.Date > DateTime.Today
-                            ? "当前查看：未来日期"
-                            : "当前查看：历史日期"
-                    : "正在初始化数据服务";
+                            ? LocalizationService.Instance.Get("Overview.ViewingFuture")
+                            : LocalizationService.Instance.Get("Overview.ViewingHistory")
+                    : LocalizationService.Instance.Get("Overview.Initializing");
         }
         if (!_context.IsInitialized)
         {
-            OverviewStateText.Text = string.IsNullOrWhiteSpace(_context.InitializationError) ? "正在加载数据库和追踪服务" : $"初始化失败：{_context.InitializationError}";
+            OverviewStateText.Text = string.IsNullOrWhiteSpace(_context.InitializationError) ? LocalizationService.Instance.Get("Overview.InitDatabase") : string.Format(LocalizationService.Instance.Get("Overview.InitFailed"), _context.InitializationError);
             EarliestDateText.Text = "--";
-            CurrentScopeText.Text = "初始化中";
+            CurrentScopeText.Text = LocalizationService.Instance.Get("Overview.WaitingInit");
             IdleStateText.Text = "--";
             return;
         }
@@ -265,13 +265,13 @@ public partial class OverviewPage : System.Windows.Controls.UserControl
 
         _dateInputValidationMessage = null;
         _context.SetSelectedDate(baseDate);
-        SelectedDateStatusText.Text = "日期已切换";
+        SelectedDateStatusText.Text = LocalizationService.Instance.Get("Overview.DateSwitched");
     }
 
     private bool TryReadDateInputs(out DateTime date, out string errorMessage)
     {
         date = default;
-        errorMessage = "日期无效，请输入合法年月日";
+        errorMessage = LocalizationService.Instance.Get("Overview.InvalidDate");
 
         if (!int.TryParse(YearInput.Text, out var y) || !int.TryParse(MonthInput.Text, out var m) || !int.TryParse(DayInput.Text, out var d))
         {
