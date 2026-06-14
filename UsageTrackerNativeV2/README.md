@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Junmst/UsageTracker/releases/latest">
-    <img src="https://img.shields.io/badge/📥-下载最新版-4ECDC4?style=for-the-badge&logo=github" alt="下载"/>
+  <a href="https://gitee.com/junmarvel/usage-tracker-v2/releases">
+    <img src="https://img.shields.io/badge/📥-下载最新版-4ECDC4?style=for-the-badge&logo=gitee" alt="下载"/>
   </a>
   <a href="https://dotnet.microsoft.com/">
     <img src="https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&style=flat-square" alt=".NET 8"/>
@@ -85,7 +85,7 @@
 
 ### 直接使用（推荐）
 
-1. 前往 [Releases](https://github.com/Junmst/UsageTracker/releases/latest) 下载最新 zip
+1. 前往 [Releases](https://gitee.com/junmarvel/usage-tracker-v2/releases) 下载最新 zip
 2. 解压到任意目录
 3. 双击 `时迹.exe` 启动
 4. 程序最小化到系统托盘，开始自动记录
