@@ -85,7 +85,7 @@
 
 ### 直接使用（推荐）
 
-1. 前往 [v3 发布页](https://github.com/Junmst/usagetrack/releases/tag/v3) 下载 `启动器-v3-win-x64.zip`
+1. 前往 [v3 发布页](https://github.com/Junmst/UsageTracker/releases/tag/v3) 下载 `启动器-v3-win-x64.zip`
 2. 解压到任意目录（不要只解压单个 exe）
 3. 双击 `时迹Web.exe` 启动启动器
 4. 启动器会自动启动同一压缩包内 `native\时迹.exe`，后台记录使用时长且默认不显示时迹窗口
