@@ -1,8 +1,8 @@
 using Microsoft.Win32;
 using System;
 using System.Diagnostics;
-using System.Drawing;
 using System.IO;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -19,16 +19,9 @@ namespace UsageTrackerNative;
 
 public partial class App : Application
 {
-    private Forms.NotifyIcon? _notifyIcon;
-    private ITrayHost? _trayHost;
-    private Window? _trayMenuWindow;
-    private Border? _trayMenuFlyout;
-    private TranslateTransform? _trayMenuTransform;
-    private DispatcherTimer? _trayMenuCloseTimer;
-    private bool _isTrayMenuClosing;
     private ShellWindow? _shellWindow;
-    private static readonly Duration TrayMenuAnimationDuration = new(TimeSpan.FromMilliseconds(240));
-    private const double TrayMenuOffsetY = -4d;
+    private NativeControlPipeServer? _controlPipeServer;
+    private Mutex? _singleInstanceMutex;
     private static readonly string StartupLogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         UsageTrackerService.DataDirectoryName,
@@ -36,7 +29,14 @@ public partial class App : Application
 
     internal static Stopwatch StartupStopwatch = Stopwatch.StartNew();
 
-    protected override void OnStartup(StartupEventArgs e)
+    // startup.log 只保留最近内容，避免长期运行后无限膨胀（历史上曾涨到 170MB+）
+    private const long StartupLogMaxBytes = 2L * 1024 * 1024;
+    private const int MaxLogMessageLength = 8000;
+    private static readonly object StartupLogLock = new();
+    private static readonly HashSet<string> ReportedRuntimeErrors = new(StringComparer.Ordinal);
+    private static DateTime _lastLogSizeCheckAt = DateTime.MinValue;
+
+    protected override async void OnStartup(StartupEventArgs e)
     {
         LogStartupMessage("App.OnStartup", $"Entry: {StartupStopwatch.ElapsedMilliseconds}ms, ProcessStartTime: {Process.GetCurrentProcess().StartTime:O}");
         DispatcherUnhandledException += App_DispatcherUnhandledException;
@@ -46,6 +46,16 @@ public partial class App : Application
         try
         {
             base.OnStartup(e);
+            _singleInstanceMutex = new Mutex(true, "Shiji.Native.SingleInstance", out var isFirstInstance);
+            if (!isFirstInstance)
+            {
+                if (!e.Args.Any(arg => string.Equals(arg, UsageTrackerService.StartupCompactArgument, StringComparison.OrdinalIgnoreCase)))
+                {
+                    await NativeControlPipeClient.TrySendAsync("show");
+                }
+                Shutdown(0);
+                return;
+            }
             GlobalSmoothScroll.Enable();
             LogStartupMessage("App.OnStartup", $"After base.OnStartup: {StartupStopwatch.ElapsedMilliseconds}ms");
 
@@ -65,21 +75,19 @@ public partial class App : Application
             var persistedLanguage = UsageTrackerService.LoadPersistedLanguage();
             LocalizationService.Instance.SetLanguage(persistedLanguage);
             LogStartupMessage("App.OnStartup", $"Language initialized: {persistedLanguage}");
-
-            _trayHost = mainWindow;
             MainWindow = mainWindow;
-            LogStartupMessage("App.OnStartup", $"Before ConfigureTray: {StartupStopwatch.ElapsedMilliseconds}ms");
-            ConfigureTray();
-            LogStartupMessage("App.OnStartup", $"After ConfigureTray: {StartupStopwatch.ElapsedMilliseconds}ms");
+            _controlPipeServer = new NativeControlPipeServer(Dispatcher, mainWindow);
+            LogStartupMessage("App.OnStartup", $"Native control pipe ready: {StartupStopwatch.ElapsedMilliseconds}ms");
 
             if (e.Args.Any(arg => string.Equals(arg, UsageTrackerService.StartupCompactArgument, StringComparison.OrdinalIgnoreCase)))
             {
-                mainWindow.ShowCompactSessionWindow();
+                mainWindow.HideFromLauncher();
                 return;
             }
 
-            mainWindow.RestoreFromTray();
-            LogStartupMessage("App.OnStartup", $"After RestoreFromTray (OnStartup complete): {StartupStopwatch.ElapsedMilliseconds}ms");
+            mainWindow.Show();
+            mainWindow.Activate();
+            LogStartupMessage("App.OnStartup", $"Visible standalone startup complete: {StartupStopwatch.ElapsedMilliseconds}ms");
         }
         catch (Exception ex)
         {
@@ -91,9 +99,52 @@ public partial class App : Application
 
     private static void App_DispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
     {
-        LogStartupException("DispatcherUnhandledException", e.Exception);
-        Forms.MessageBox.Show(string.Format(LocalizationService.Instance.Get("App.RuntimeError"), e.Exception.Message, StartupLogPath), LocalizationService.Instance.Get("App.Name"), Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Error);
         e.Handled = true;
+        LogStartupException("DispatcherUnhandledException", e.Exception);
+        TryShowRuntimeErrorDialog(e.Exception);
+    }
+
+    /// <summary>
+    /// 同一类错误每个进程只弹一次（最多 5 类），避免后台轮询反复失败时弹窗刷屏，
+    /// 也避免弹窗本身再次抛异常导致连锁崩溃。
+    /// </summary>
+    private static void TryShowRuntimeErrorDialog(Exception? exception)
+    {
+        var signature = exception is null
+            ? "unknown"
+            : (exception.GetType().FullName ?? exception.GetType().Name) + "|" + SafeMessage(exception);
+
+        lock (ReportedRuntimeErrors)
+        {
+            if (ReportedRuntimeErrors.Count >= 5 || !ReportedRuntimeErrors.Add(signature))
+            {
+                return;
+            }
+        }
+
+        try
+        {
+            Forms.MessageBox.Show(
+                string.Format(LocalizationService.Instance.Get("App.RuntimeError"), SafeMessage(exception), StartupLogPath),
+                LocalizationService.Instance.Get("App.Name"),
+                Forms.MessageBoxButtons.OK,
+                Forms.MessageBoxIcon.Error);
+        }
+        catch
+        {
+        }
+    }
+
+    private static string SafeMessage(Exception? exception)
+    {
+        try
+        {
+            return exception?.Message ?? string.Empty;
+        }
+        catch
+        {
+            return "(异常信息读取失败)";
+        }
     }
 
     private static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
@@ -112,365 +163,124 @@ public partial class App : Application
 
     internal static void LogStartupMessage(string source, string message)
     {
-        var logMessage = $"[{DateTime.Now:O}] {source}\r\n{message}\r\n\r\n";
-        
+        var body = TruncateLogText(message);
+        var logMessage = $"[{DateTime.Now:O}] {source}\r\n{body}\r\n\r\n";
+
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(StartupLogPath)!);
-            File.AppendAllText(StartupLogPath, logMessage);
+            lock (StartupLogLock)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(StartupLogPath)!);
+                RotateStartupLogIfNeeded();
+                File.AppendAllText(StartupLogPath, logMessage);
+            }
         }
         catch
         {
+            // 日志失败绝不能影响主流程
+        }
+    }
+
+    /// <summary>
+    /// 日志超过上限时滚动为 startup.log.1（只保留一份历史），
+    /// 避免长期运行后日志无限增长拖垮磁盘与安全软件扫描。
+    /// </summary>
+    private static void RotateStartupLogIfNeeded()
+    {
+        var now = DateTime.Now;
+        if (now - _lastLogSizeCheckAt < TimeSpan.FromSeconds(20))
+        {
+            return;
+        }
+
+        _lastLogSizeCheckAt = now;
+        try
+        {
+            var info = new FileInfo(StartupLogPath);
+            if (!info.Exists || info.Length < StartupLogMaxBytes)
+            {
+                return;
+            }
+
+            File.Move(StartupLogPath, StartupLogPath + ".1", overwrite: true);
+        }
+        catch
+        {
+            // 文件被占用等极端情况：直接清空，宁可少一份历史也不要无限增长
+            try
+            {
+                File.WriteAllText(StartupLogPath, string.Empty);
+            }
+            catch
+            {
+            }
         }
     }
 
     internal static void LogStartupException(string source, Exception exception)
     {
-        LogStartupMessage(source, exception.ToString());
+        LogStartupMessage(source, DescribeException(exception));
     }
 
-
-    private void ConfigureTray()
+    /// <summary>
+    /// 安全地把异常转成字符串：内存极度紧张时 <c>Exception.ToString()</c> 会因反射解析堆栈
+    /// 再抛 OutOfMemoryException，这里逐段兜底，保证任何时候都能记下关键信息。
+    /// </summary>
+    private static string DescribeException(Exception? exception)
     {
-        System.Drawing.Icon trayIcon;
+        if (exception is null)
+        {
+            return "(no exception)";
+        }
+
+        var builder = new StringBuilder(512);
+        var current = exception;
+        for (var depth = 0; current is not null && depth < 4; depth++)
+        {
+            if (depth > 0)
+            {
+                builder.Append("--- InnerException ---\r\n");
+            }
+
+            AppendSafely(builder, () => current.GetType().FullName ?? current.GetType().Name);
+            builder.Append(": ");
+            AppendSafely(builder, () => current.Message);
+            builder.Append("\r\n");
+            AppendSafely(builder, () => current.StackTrace);
+            current = current.InnerException;
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendSafely(StringBuilder builder, Func<string?> valueFactory)
+    {
         try
         {
-            var streamInfo = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/app-icon.ico"));
-            if (streamInfo is not null)
+            var value = valueFactory();
+            if (!string.IsNullOrEmpty(value))
             {
-                using (streamInfo.Stream)
-                    trayIcon = new System.Drawing.Icon(streamInfo.Stream);
-            }
-            else
-            {
-                trayIcon = SystemIcons.Application;
+                builder.Append(value);
             }
         }
         catch
         {
-            trayIcon = SystemIcons.Application;
+            builder.Append("(异常信息读取失败)");
         }
-
-        _notifyIcon = new Forms.NotifyIcon
-        {
-            Text = "时迹",
-            Icon = trayIcon,
-            Visible = true
-        };
-        _notifyIcon.MouseClick += (_, e) =>
-        {
-            if (e.Button == Forms.MouseButtons.Left)
-            {
-                TryTrayAction(() => _trayHost?.RestoreFromTray());
-            }
-        };
-        _notifyIcon.MouseUp += (_, e) =>
-        {
-            if (e.Button == Forms.MouseButtons.Right)
-            {
-                Dispatcher.BeginInvoke(ShowTrayMenu, DispatcherPriority.Input);
-            }
-        };
     }
 
-    private void ShowTrayMenu()
+    private static string TruncateLogText(string? value)
     {
-        try
+        if (string.IsNullOrEmpty(value))
         {
-            LogStartupMessage("TrayMenu", $"Show requested at {Forms.Cursor.Position}");
-            ShowTrayMenuCore();
-            LogStartupMessage("TrayMenu", "Show completed");
+            return string.Empty;
         }
-        catch (Exception ex)
-        {
-            LogStartupException("TrayMenu.ShowTrayMenu", ex);
-        }
+
+        return value.Length <= MaxLogMessageLength
+            ? value
+            : value[..MaxLogMessageLength] + "\r\n...(日志过长已截断)";
     }
 
-    private void ShowTrayMenuCore()
-    {
-        CloseTrayMenu(immediate: true);
-
-        _trayMenuCloseTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
-        _trayMenuCloseTimer.Tick -= TrayMenuCloseTimer_Tick;
-        _trayMenuCloseTimer.Tick += TrayMenuCloseTimer_Tick;
-
-        var content = new StackPanel();
-        content.Children.Add(CreateTrayMenuItem("打开主界面", () => TryTrayAction(() => _trayHost?.RestoreFromTray())));
-        content.Children.Add(CreateTrayMenuItem("小窗模式", () => TryTrayAction(() => _trayHost?.ShowCompactSessionWindow())));
-        content.Children.Add(CreateTrayMenuSeparator());
-        content.Children.Add(CreateTrayMenuItem("退出", () => TryTrayAction(() =>
-        {
-            _trayHost?.ExitFromTray();
-            Shutdown();
-        })));
-
-        _trayMenuTransform = new TranslateTransform { Y = TrayMenuOffsetY };
-        _trayMenuFlyout = new Border
-        {
-            Width = 120,
-            Padding = new Thickness(0, 4, 0, 4),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            Opacity = 0,
-            RenderTransform = _trayMenuTransform,
-            Child = content
-        };
-        _trayMenuFlyout.SetResourceReference(Border.BackgroundProperty, "ButtonBackgroundBrush");
-        _trayMenuFlyout.SetResourceReference(Border.BorderBrushProperty, "ButtonBorderBrush");
-        _trayMenuFlyout.MouseEnter += TrayMenuArea_MouseEnter;
-        _trayMenuFlyout.MouseLeave += TrayMenuArea_MouseLeave;
-
-        var position = GetTrayMenuDipPosition();
-        _trayMenuWindow = new Window
-        {
-            WindowStyle = WindowStyle.None,
-            AllowsTransparency = true,
-            Background = System.Windows.Media.Brushes.Transparent,
-            ShowInTaskbar = false,
-            Topmost = true,
-            SizeToContent = SizeToContent.WidthAndHeight,
-            ResizeMode = ResizeMode.NoResize,
-            Content = _trayMenuFlyout,
-            Left = position.X - 120,
-            Top = position.Y - 18,
-            WindowStartupLocation = WindowStartupLocation.Manual,
-            ShowActivated = false
-        };
-        _trayMenuWindow.Show();
-        EnsureTrayMenuWithinScreen();
-        AnimateTrayMenu(show: true);
-    }
-
-    private Border CreateTrayMenuItem(string text, Action action)
-    {
-        var item = new Border
-        {
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(10, 6, 10, 6),
-            Margin = new Thickness(4, 2, 4, 2),
-            Cursor = System.Windows.Input.Cursors.Hand,
-            Background = System.Windows.Media.Brushes.Transparent,
-            Child = new TextBlock
-            {
-                Text = text,
-                FontSize = 12.5,
-                FontWeight = FontWeights.SemiBold,
-                VerticalAlignment = VerticalAlignment.Center
-            }
-        };
-        ((TextBlock)item.Child).SetResourceReference(TextBlock.ForegroundProperty, "PrimaryTextBrush");
-        item.MouseEnter += (_, _) =>
-        {
-            _trayMenuCloseTimer?.Stop();
-            item.SetResourceReference(Border.BackgroundProperty, "DataGridRowHoverBrush");
-        };
-        item.MouseLeave += (_, _) =>
-        {
-            item.Background = System.Windows.Media.Brushes.Transparent;
-            StartTrayMenuCloseCheck();
-        };
-        item.MouseLeftButtonDown += (_, _) => item.Opacity = 0.82;
-        item.MouseLeftButtonUp += (_, e) =>
-        {
-            e.Handled = true;
-            item.Opacity = 1;
-            CloseTrayMenu(immediate: true);
-            action();
-        };
-        return item;
-    }
-
-    private static Separator CreateTrayMenuSeparator()
-    {
-        var separator = new Separator { Margin = new Thickness(6, 3, 6, 3) };
-        separator.SetResourceReference(System.Windows.Controls.Control.BorderBrushProperty, "ButtonBorderBrush");
-        return separator;
-    }
-
-    private System.Windows.Point GetTrayMenuDipPosition()
-    {
-        var cursor = Forms.Cursor.Position;
-        var source = MainWindow is not null ? PresentationSource.FromVisual(MainWindow) : null;
-        if (source?.CompositionTarget is not null)
-        {
-            return source.CompositionTarget.TransformFromDevice.Transform(new System.Windows.Point(cursor.X, cursor.Y));
-        }
-
-        return new System.Windows.Point(cursor.X, cursor.Y);
-    }
-
-    private Rect GetCurrentScreenDipWorkingArea()
-    {
-        var screen = Forms.Screen.FromPoint(Forms.Cursor.Position).WorkingArea;
-        var source = MainWindow is not null ? PresentationSource.FromVisual(MainWindow) : null;
-        if (source?.CompositionTarget is not null)
-        {
-            var topLeft = source.CompositionTarget.TransformFromDevice.Transform(new System.Windows.Point(screen.Left, screen.Top));
-            var bottomRight = source.CompositionTarget.TransformFromDevice.Transform(new System.Windows.Point(screen.Right, screen.Bottom));
-            return new Rect(topLeft, bottomRight);
-        }
-
-        return new Rect(screen.Left, screen.Top, screen.Width, screen.Height);
-    }
-
-    private void EnsureTrayMenuWithinScreen()
-    {
-        if (_trayMenuWindow is null)
-        {
-            return;
-        }
-
-        var screen = GetCurrentScreenDipWorkingArea();
-        _trayMenuWindow.UpdateLayout();
-        var width = _trayMenuWindow.ActualWidth;
-        var height = _trayMenuWindow.ActualHeight;
-        if (_trayMenuWindow.Left + width > screen.Right)
-        {
-            _trayMenuWindow.Left = screen.Right - width - 4;
-        }
-        if (_trayMenuWindow.Left < screen.Left)
-        {
-            _trayMenuWindow.Left = screen.Left + 4;
-        }
-        if (_trayMenuWindow.Top + height > screen.Bottom)
-        {
-            var cursor = GetTrayMenuDipPosition();
-            _trayMenuWindow.Top = cursor.Y - height + 8;
-        }
-        if (_trayMenuWindow.Top < screen.Top)
-        {
-            _trayMenuWindow.Top = screen.Top + 4;
-        }
-    }
-
-    private void TrayMenuArea_MouseEnter(object sender, MouseEventArgs e)
-    {
-        _trayMenuCloseTimer?.Stop();
-    }
-
-    private void TrayMenuArea_MouseLeave(object sender, MouseEventArgs e)
-    {
-        StartTrayMenuCloseCheck();
-    }
-
-    private void StartTrayMenuCloseCheck()
-    {
-        if (_trayMenuWindow?.IsVisible != true)
-        {
-            return;
-        }
-        _trayMenuCloseTimer?.Stop();
-        _trayMenuCloseTimer?.Start();
-    }
-
-    private void TrayMenuCloseTimer_Tick(object? sender, EventArgs e)
-    {
-        _trayMenuCloseTimer?.Stop();
-        if (_trayMenuWindow?.IsVisible != true)
-        {
-            return;
-        }
-        if (IsMouseWithin(_trayMenuFlyout))
-        {
-            return;
-        }
-        CloseTrayMenu();
-    }
-
-    private void CloseTrayMenu(bool immediate = false)
-    {
-        _trayMenuCloseTimer?.Stop();
-        if (_trayMenuWindow is null)
-        {
-            return;
-        }
-
-        if (immediate || _trayMenuFlyout is null || _trayMenuTransform is null)
-        {
-            _trayMenuWindow.Close();
-            ClearTrayMenuRefs();
-            return;
-        }
-
-        if (_isTrayMenuClosing)
-        {
-            return;
-        }
-
-        _isTrayMenuClosing = true;
-        var window = _trayMenuWindow;
-        AnimateTrayMenu(show: false, () =>
-        {
-            window.Close();
-            ClearTrayMenuRefs();
-        });
-    }
-
-    private void AnimateTrayMenu(bool show, Action? completed = null)
-    {
-        if (_trayMenuFlyout is null || _trayMenuTransform is null)
-        {
-            completed?.Invoke();
-            return;
-        }
-
-        var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var opacityAnimation = new DoubleAnimation
-        {
-            To = show ? 1 : 0,
-            Duration = TrayMenuAnimationDuration,
-            EasingFunction = easing
-        };
-        var yAnimation = new DoubleAnimation
-        {
-            To = show ? 0 : TrayMenuOffsetY,
-            Duration = TrayMenuAnimationDuration,
-            EasingFunction = easing
-        };
-        if (completed is not null)
-        {
-            opacityAnimation.Completed += (_, _) => completed();
-        }
-        _trayMenuFlyout.BeginAnimation(UIElement.OpacityProperty, opacityAnimation);
-        _trayMenuTransform.BeginAnimation(TranslateTransform.YProperty, yAnimation);
-    }
-
-    private void ClearTrayMenuRefs()
-    {
-        if (_trayMenuFlyout is not null)
-        {
-            _trayMenuFlyout.MouseEnter -= TrayMenuArea_MouseEnter;
-            _trayMenuFlyout.MouseLeave -= TrayMenuArea_MouseLeave;
-        }
-        _trayMenuWindow = null;
-        _trayMenuFlyout = null;
-        _trayMenuTransform = null;
-        _isTrayMenuClosing = false;
-    }
-
-    private static bool IsMouseWithin(FrameworkElement? element)
-    {
-        if (element is null || !element.IsVisible)
-        {
-            return false;
-        }
-
-        var point = System.Windows.Input.Mouse.GetPosition(element);
-        return point.X >= 0 && point.Y >= 0 && point.X <= element.ActualWidth && point.Y <= element.ActualHeight;
-    }
-
-    private static void TryTrayAction(Action action)
-    {
-        try
-        {
-            action();
-        }
-        catch (Exception ex)
-        {
-            LogStartupException("TrayAction", ex);
-        }
-    }
 
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
     {
@@ -484,17 +294,10 @@ public partial class App : Application
     {
         LogStartupMessage("App.OnExit", $"ExitCode={e.ApplicationExitCode}, ShutdownMode={ShutdownMode}, DispatcherShutdownStarted={Dispatcher.HasShutdownStarted}, MainWindow={MainWindow?.GetType().Name ?? "null"}");
         DisposeTrackerService();
-        CloseTrayMenu(immediate: true);
-        _trayMenuCloseTimer?.Stop();
-        if (_trayMenuCloseTimer is not null)
-        {
-            _trayMenuCloseTimer.Tick -= TrayMenuCloseTimer_Tick;
-        }
-        if (_notifyIcon is not null)
-        {
-            _notifyIcon.Visible = false;
-            _notifyIcon.Dispose();
-        }
+        _controlPipeServer?.Dispose();
+        _controlPipeServer = null;
+        _singleInstanceMutex?.Dispose();
+        _singleInstanceMutex = null;
 
         base.OnExit(e);
     }

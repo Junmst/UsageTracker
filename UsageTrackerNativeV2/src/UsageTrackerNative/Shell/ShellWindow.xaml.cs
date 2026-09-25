@@ -188,7 +188,7 @@ public partial class ShellWindow : Window, ITrayHost
         e.Cancel = true;
         HideCompactSessionWindow();
         Hide();
-        App.LogStartupMessage("ShellWindow.Closing", "Main window close was converted to tray hide.");
+        App.LogStartupMessage("ShellWindow.Closing", "Main window close was converted to background hide.");
     }
 
     private void ShellWindow_Closed(object? sender, EventArgs e)
@@ -608,6 +608,17 @@ public partial class ShellWindow : Window, ITrayHost
     private static void SetBrush(string key, SolidColorBrush brush)
     {
         System.Windows.Application.Current.Resources[key] = brush;
+    }
+
+    public void HideFromLauncher()
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        HideCompactSessionWindow();
+        Hide();
     }
 
     public void RestoreFromTray()

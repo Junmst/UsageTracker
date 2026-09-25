@@ -52,6 +52,9 @@ public sealed class UsageTrackerService : IDisposable
     private const string DefaultManualIdleShortcutText = "";
     private static readonly TimeSpan SleepGapThreshold = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan LongIdleMediaProtectionThreshold = TimeSpan.FromMinutes(30);
+    // 轮询级诊断日志默认关闭：开启后 startup.log 会以每 5 秒一条的速度增长（历史上涨到 170MB+，并拖累磁盘与安全软件）
+    private static readonly bool VerboseDiagnosticsEnabled =
+        string.Equals(Environment.GetEnvironmentVariable("USAGETRACKER_VERBOSE"), "1", StringComparison.OrdinalIgnoreCase);
     private static readonly SubjectDefinition[] DefaultSubjects = [];
     private readonly DispatcherTimer _pollTimer;
     private readonly DispatcherTimer _idleClickTimer;
@@ -83,6 +86,12 @@ public sealed class UsageTrackerService : IDisposable
     private bool _fullSyncNeeded;
     private bool _activeSessionDirty;
     private bool _settingsDirty;
+    // 配置文件热重载：settings.json 是唯一共享配置源，多实例同时运行时保持规则同步
+    private FileSystemWatcher? _settingsWatcher;
+    private DispatcherTimer? _settingsReloadTimer;
+    private DateTime _settingsReloadRequestedAtUtc = DateTime.MinValue;
+    private string _lastWrittenRulesSignature = string.Empty;
+    private readonly object _settingsSyncLock = new();
     // 渐进数据加载状态
     private DataLoadPhase _dataLoadPhase = DataLoadPhase.Idle;
     private DateTime _loadedRangeStart = DateTime.MaxValue;
@@ -1835,7 +1844,12 @@ public sealed class UsageTrackerService : IDisposable
 
     private void LogParallelAudioState(WindowSnapshot snapshot, MediaPlaybackSnapshot playback, IReadOnlyCollection<string> audibleProcessNames, ParallelActivitySnapshot? activity)
     {
-        if ((DateTime.Now - _lastParallelAudioStateLogAt) < TimeSpan.FromSeconds(5))
+        if (!VerboseDiagnosticsEnabled)
+        {
+            return;
+        }
+
+        if ((DateTime.Now - _lastParallelAudioStateLogAt) < TimeSpan.FromSeconds(30))
         {
             return;
         }
@@ -2092,6 +2106,7 @@ public sealed class UsageTrackerService : IDisposable
             // 1. Load settings (always from settings.json)
             LoadSettingsFromDisk();
             App.LogStartupMessage("UsageTrackerService.LoadStateCore", "settings loaded");
+            StartSettingsWatcher();
             // 2. Ensure DB exists, load only active session (fast, no full history load)
             try
             {
@@ -2196,23 +2211,16 @@ public sealed class UsageTrackerService : IDisposable
         SetLoadPhase(DataLoadPhase.Loading, "正在加载最近7天数据...");
         try
         {
-            await Task.Run(() =>
+            // 只加载已加载区间之前的缺失日期
+            var loadedRangeStart = _loadedRangeStart;
+            var from = DateTime.Today.AddDays(-6).AddHours(4);
+            if (from < loadedRangeStart)
             {
-                var today = DateTime.Today;
-                var sevenDaysAgo = today.AddDays(-6);
-                var from = sevenDaysAgo.AddHours(4);
-                var to = today.AddHours(4).AddDays(1);
-
-                // 只加载已加载区间之前的缺失日期
-                if (from < _loadedRangeStart)
-                {
-                    var beforeCount = _history.Count;
-                    _repository.LoadHistoryForDateRange(_history, from, _loadedRangeStart);
-                    UpdateLoadedRange(from, _loadedRangeEnd);
-                    RebuildSessionIndex();
-                    App.LogStartupMessage("BackgroundLoad", $"Phase 2 loaded {_history.Count - beforeCount} records (last 7 days)");
-                }
-            });
+                // 查询走后台线程（纯 SQL，不触碰 _history），合并必须回到 UI 线程
+                var records = await Task.Run(() => _repository.QueryHistoryForDateRange(from, loadedRangeStart));
+                var added = await MergeHistoryOnUiThreadAsync(records, from);
+                App.LogStartupMessage("BackgroundLoad", $"Phase 2 loaded {added} records (last 7 days)");
+            }
         }
         catch (Exception ex)
         {
@@ -2223,20 +2231,15 @@ public sealed class UsageTrackerService : IDisposable
         SetLoadPhase(DataLoadPhase.Partial, "正在加载本月数据...");
         try
         {
-            await Task.Run(() =>
+            var loadedRangeStart = _loadedRangeStart;
+            var today = DateTime.Today;
+            var monthStart = new DateTime(today.Year, today.Month, 1);
+            if (monthStart < loadedRangeStart)
             {
-                var today = DateTime.Today;
-                var monthStart = new DateTime(today.Year, today.Month, 1);
-
-                if (monthStart < _loadedRangeStart)
-                {
-                    var beforeCount = _history.Count;
-                    _repository.LoadHistoryForDateRange(_history, monthStart.AddHours(4), _loadedRangeStart);
-                    UpdateLoadedRange(monthStart, _loadedRangeEnd);
-                    RebuildSessionIndex();
-                    App.LogStartupMessage("BackgroundLoad", $"Phase 3 loaded {_history.Count - beforeCount} records (month-to-date remainder)");
-                }
-            });
+                var records = await Task.Run(() => _repository.QueryHistoryForDateRange(monthStart.AddHours(4), loadedRangeStart));
+                var added = await MergeHistoryOnUiThreadAsync(records, monthStart);
+                App.LogStartupMessage("BackgroundLoad", $"Phase 3 loaded {added} records (month-to-date remainder)");
+            }
         }
         catch (Exception ex)
         {
@@ -2246,9 +2249,44 @@ public sealed class UsageTrackerService : IDisposable
         SetLoadPhase(DataLoadPhase.Loaded, null);
         App.LogStartupMessage("BackgroundLoad", $"all phases complete, total _history: {_history.Count}");
     }
+
     /// <summary>
-    /// 返回当前已加载到内存的日期范围（用于 UI 判断哪些日期可以直接从内存查）。
+    /// 在 UI 线程把后台查到的历史记录合并进 _history 并刷新索引。
+    /// _history 由 UI 线程独占修改（轮询写入 / 导入 / 编辑），后台线程直接 Add/遍历
+    /// 会抛 "Collection was modified" 甚至破坏 List 内部状态。
     /// </summary>
+    private async Task<int> MergeHistoryOnUiThreadAsync(List<UsageSessionRecord> records, DateTime newRangeStart)
+    {
+        if (!_pollTimer.Dispatcher.CheckAccess())
+        {
+            return await _pollTimer.Dispatcher.InvokeAsync(() => MergeHistoryOnUiThread(records, newRangeStart));
+        }
+
+        return MergeHistoryOnUiThread(records, newRangeStart);
+    }
+
+    private int MergeHistoryOnUiThread(List<UsageSessionRecord> records, DateTime newRangeStart)
+    {
+        var beforeCount = _history.Count;
+        var existingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in _history)
+        {
+            existingIds.Add(item.Id);
+        }
+
+        foreach (var record in records)
+        {
+            if (existingIds.Add(record.Id))
+            {
+                _history.Add(record);
+            }
+        }
+
+        UpdateLoadedRange(newRangeStart, _loadedRangeEnd);
+        RebuildSessionIndex();
+        return _history.Count - beforeCount;
+    }
+
 
 
     private void RebuildSessionIndex()
@@ -2714,6 +2752,8 @@ public sealed class UsageTrackerService : IDisposable
         try
         {
             Directory.CreateDirectory(_dataDirectory);
+            // 写回前先对齐共享配置，避免用旧内存快照把其他实例的新规则覆盖掉
+            TrySyncSharedRulesFromDisk();
             var settings = CreateSettingsSnapshot(preserveExistingShortcut: true);
             WriteSettingsAtomically(_settingsFilePath, settings);
         }
@@ -2859,7 +2899,7 @@ public sealed class UsageTrackerService : IDisposable
         }
     }
 
-    private static void WriteSettingsAtomically(string filePath, UsageTrackerSettings settings)
+    private void WriteSettingsAtomically(string filePath, UsageTrackerSettings settings)
     {
         var tempPath = filePath + ".tmp";
         using (var stream = File.Create(tempPath))
@@ -2868,6 +2908,177 @@ public sealed class UsageTrackerService : IDisposable
             stream.Flush();
         }
         File.Move(tempPath, filePath, overwrite: true);
+        lock (_settingsSyncLock)
+        {
+            // 记录自己刚写入的内容，热重载时据此忽略自身写入，避免回环
+            _lastWrittenRulesSignature = BuildRulesSignature(settings);
+        }
+    }
+
+    // ── 共享配置热重载（多实例共用 settings.json） ──
+
+    private void StartSettingsWatcher()
+    {
+        try
+        {
+            Directory.CreateDirectory(_dataDirectory);
+            _settingsReloadTimer ??= new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(300)
+            };
+            _settingsReloadTimer.Tick -= SettingsReloadTimer_Tick;
+            _settingsReloadTimer.Tick += SettingsReloadTimer_Tick;
+
+            _settingsWatcher?.Dispose();
+            _settingsWatcher = new FileSystemWatcher(_dataDirectory, SettingsFileName)
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime,
+                IncludeSubdirectories = false
+            };
+            _settingsWatcher.Changed += SettingsWatcher_OnChanged;
+            _settingsWatcher.Created += SettingsWatcher_OnChanged;
+            _settingsWatcher.Renamed += SettingsWatcher_OnChanged;
+            _settingsWatcher.EnableRaisingEvents = true;
+            App.LogStartupMessage("SettingsWatcher", $"watching {_settingsFilePath}");
+        }
+        catch (Exception ex)
+        {
+            App.LogStartupException("UsageTrackerService.StartSettingsWatcher", ex);
+        }
+    }
+    private void SettingsWatcher_OnChanged(object sender, FileSystemEventArgs e)
+    {
+        // 文件写入可能触发多次事件，统一交给 UI 线程上的防抖计时器处理
+        _settingsReloadRequestedAtUtc = DateTime.UtcNow;
+        var timer = _settingsReloadTimer;
+        if (timer is null)
+        {
+            return;
+        }
+        if (timer.Dispatcher.CheckAccess())
+        {
+            if (!timer.IsEnabled) timer.Start();
+        }
+        else
+        {
+            timer.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!timer.IsEnabled) timer.Start();
+            }));
+        }
+    }
+    private void SettingsReloadTimer_Tick(object? sender, EventArgs e)
+    {
+        if (_settingsReloadTimer is { IsEnabled: true } && DateTime.UtcNow - _settingsReloadRequestedAtUtc < TimeSpan.FromMilliseconds(250))
+        {
+            return;
+        }
+        _settingsReloadTimer?.Stop();
+        try
+        {
+            if (TrySyncSharedRulesFromDisk())
+            {
+                RefreshTodayUnmanualSnapshots();
+                RaiseChanged(null, ActiveSession);
+                App.LogStartupMessage("SettingsWatcher", "shared rules reloaded from settings.json");
+            }
+        }
+        catch (Exception ex)
+        {
+            App.LogStartupException("UsageTrackerService.SettingsReloadTimer_Tick", ex);
+        }
+    }
+    /// <summary>
+    /// settings.json 是共享配置的唯一真源：当文件被其他实例修改时，
+    /// 用文件内容覆盖本进程内存中的规则，保证多实例一致。
+    /// 只同步分类相关配置（关键词规则 / 手动科目映射 / 分类定义），
+    /// 主题、语言等外观设置仍各实例保留。
+    /// </summary>
+    private bool TrySyncSharedRulesFromDisk()
+    {
+        if (!File.Exists(_settingsFilePath))
+        {
+            return false;
+        }
+        UsageTrackerSettings? settings;
+        try
+        {
+            using var stream = new FileStream(_settingsFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            settings = JsonSerializer.Deserialize(stream, UsageTrackerJsonContext.Default.UsageTrackerSettings);
+        }
+        catch (Exception ex)
+        {
+            App.LogStartupException("UsageTrackerService.TrySyncSharedRulesFromDisk", ex);
+            return false;
+        }
+        if (settings is null)
+        {
+            return false;
+        }
+
+        var incomingSignature = BuildRulesSignature(settings);
+        string currentSignature;
+        lock (_settingsSyncLock)
+        {
+            currentSignature = BuildRulesSignature(CreateRulesSignatureSource());
+            if (string.Equals(incomingSignature, _lastWrittenRulesSignature, StringComparison.Ordinal)
+                || string.Equals(incomingSignature, currentSignature, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        _subjectKeywordRules.Clear();
+        foreach (var pair in NormalizeSubjectKeywordRules(settings.SubjectKeywordRules))
+        {
+            _subjectKeywordRules[pair.Key] = pair.Value;
+        }
+
+        _manualSubjects.Clear();
+        foreach (var pair in settings.ManualSubjects ?? new Dictionary<string, string>())
+        {
+            _manualSubjects[pair.Key] = string.Equals(pair.Value, LegacyAutoUnclassifiedLabel, StringComparison.OrdinalIgnoreCase)
+                ? ManualUnclassifiedLabel
+                : pair.Value;
+        }
+
+        if (settings.SubjectDefinitions is { Count: > 0 })
+        {
+            _subjectDefinitions.Clear();
+            foreach (var definition in settings.SubjectDefinitions.Where(x => !string.IsNullOrWhiteSpace(x.Name)))
+            {
+                _subjectDefinitions.Add(definition.Normalize());
+            }
+        }
+
+        RemoveInvalidKeywordRules();
+        lock (_settingsSyncLock)
+        {
+            _lastWrittenRulesSignature = incomingSignature;
+        }
+        return true;
+    }
+    private UsageTrackerSettings CreateRulesSignatureSource()
+    {
+        return new UsageTrackerSettings
+        {
+            SubjectKeywordRules = SnapshotSubjectKeywordRules(),
+            ManualSubjects = new Dictionary<string, string>(_manualSubjects, StringComparer.OrdinalIgnoreCase),
+            SubjectDefinitions = _subjectDefinitions.ToList()
+        };
+    }
+    private static string BuildRulesSignature(UsageTrackerSettings settings)
+    {
+        var rules = NormalizeSubjectKeywordRules(settings.SubjectKeywordRules)
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .Select(x => x.Key + "=>" + string.Join("|", x.Value.OrderBy(k => k, StringComparer.Ordinal)));
+        var manual = (settings.ManualSubjects ?? new Dictionary<string, string>())
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .Select(x => x.Key + "=>" + x.Value);
+        var definitions = (settings.SubjectDefinitions ?? new List<SubjectDefinition>())
+            .Select(x => x.Name)
+            .OrderBy(x => x, StringComparer.Ordinal);
+        return string.Join("", rules) + "" + string.Join("", manual) + "" + string.Join("", definitions);
     }
     private void SaveStateImmediately()
     {
@@ -3289,28 +3500,62 @@ public sealed class UsageTrackerService : IDisposable
     }
     private string? ResolveSubjectForDisplay(UsageSessionRecord record)
     {
-        var primaryTitleSubject = MatchPrimaryTitleSubjectByKeyword(record.WindowTitle);
-        if (!string.IsNullOrWhiteSpace(primaryTitleSubject))
+        // Always re-evaluate with current rules — picks up keyword rule changes
+        var currentSubject = ResolveSubjectForNewSession(record);
+        if (!string.IsNullOrWhiteSpace(currentSubject))
         {
-            return primaryTitleSubject;
+            return currentSubject;
         }
 
+        // Fall back to stored snapshot if current rules don't match
         if (!string.IsNullOrWhiteSpace(record.ManualSubject))
         {
             return record.ManualSubject;
         }
-        return ResolveSubjectForNewSession(record);
+        return null;
     }
     private void RefreshTodayUnmanualSnapshots()
     {
-        foreach (var record in _history.Where(record => record.StartTime.Date == DateTime.Today && string.IsNullOrWhiteSpace(record.ManualSubject)))
+        // When keyword rules change, re-evaluate ALL records — not just today's.
+        // Clear auto-classified snapshots (those without a user manual override in _manualSubjects)
+        // so they get re-classified with the new rules.
+        foreach (var record in _history)
         {
-            record.ManualSubject = ResolveSubjectForNewSession(record);
+            var classificationKey = BuildClassificationKey(record.ProcessName, record.WindowTitle);
+            var hasUserOverride = _manualSubjects.ContainsKey(classificationKey);
+
+            if (hasUserOverride)
+            {
+                // User manually set this subject — respect it
+                record.ManualSubject = _manualSubjects[classificationKey];
+            }
+            else
+            {
+                // Auto-classified — re-evaluate with current rules
+                record.ManualSubject = ResolveSubjectForNewSession(record);
+                lock (_saveLock)
+                {
+                    if (!string.IsNullOrWhiteSpace(record.ManualSubject))
+                    {
+                        _dirtyRecordIds.Add(record.Id);
+                        _dirtyRecords[record.Id] = record;
+                    }
+                }
+            }
         }
-        if (_activeRecord is not null && string.IsNullOrWhiteSpace(_activeRecord.ManualSubject))
+        if (_activeRecord is not null)
         {
-            _activeRecord.ManualSubject = ResolveSubjectForNewSession(_activeRecord);
+            var activeKey = BuildClassificationKey(_activeRecord.ProcessName, _activeRecord.WindowTitle);
+            if (_manualSubjects.TryGetValue(activeKey, out var activeOverride))
+            {
+                _activeRecord.ManualSubject = activeOverride;
+            }
+            else
+            {
+                _activeRecord.ManualSubject = ResolveSubjectForNewSession(_activeRecord);
+            }
         }
+        QueueIncrementalSave();
     }
     private void ApplyDailySubjectSnapshots(DateTime now)
     {
@@ -3361,6 +3606,20 @@ public sealed class UsageTrackerService : IDisposable
         _isDisposed = true;
         _pollTimer.Stop();
         _pollTimer.Tick -= PollTimer_Tick;
+        if (_settingsReloadTimer is not null)
+        {
+            _settingsReloadTimer.Stop();
+            _settingsReloadTimer.Tick -= SettingsReloadTimer_Tick;
+        }
+        if (_settingsWatcher is not null)
+        {
+            _settingsWatcher.EnableRaisingEvents = false;
+            _settingsWatcher.Changed -= SettingsWatcher_OnChanged;
+            _settingsWatcher.Created -= SettingsWatcher_OnChanged;
+            _settingsWatcher.Renamed -= SettingsWatcher_OnChanged;
+            _settingsWatcher.Dispose();
+            _settingsWatcher = null;
+        }
         SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
         SystemEvents.SessionSwitch -= SystemEvents_SessionSwitch;
         _idleClickTimer.Stop();
@@ -3398,14 +3657,42 @@ public sealed class UsageTrackerService : IDisposable
             _wasMouseButtonDown = IsAnyMouseButtonDown();
             return;
         }
+
+        // Exit condition 1: mouse click (original behavior)
         var isMouseButtonDown = IsAnyMouseButtonDown();
         if (isMouseButtonDown && !_wasMouseButtonDown)
         {
-            _manualIdleStartedAt = null;
-            _idleAwaitingClickStartedAt = null;
-            _idleClickTimer.Stop();
+            ExitIdleAwaitingClick();
+            _wasMouseButtonDown = isMouseButtonDown;
+            return;
         }
         _wasMouseButtonDown = isMouseButtonDown;
+
+        // Exit condition 2: keyboard activity (e.g. Space to resume video playback)
+        // GetLastInputInfo tracks ALL input including keyboard; if idle duration
+        // dropped below a short threshold, the user resumed activity.
+        if (SystemActivityMonitor.TryGetIdleDuration(out var idleDuration) && idleDuration < TimeSpan.FromSeconds(2))
+        {
+            ExitIdleAwaitingClick();
+            return;
+        }
+
+        // Exit condition 3: media playback resumed (e.g. Space resumed video)
+        // Even without keyboard detection, if foreground process is playing audio,
+        // exit idle so CaptureCurrentWindow can resume tracking with media protection.
+        var foreground = ForegroundWindowTracker.GetCurrent();
+        if (foreground is not null && MediaPlaybackMonitor.IsProcessPlaying(foreground.ProcessId))
+        {
+            ExitIdleAwaitingClick();
+            return;
+        }
+    }
+
+    private void ExitIdleAwaitingClick()
+    {
+        _manualIdleStartedAt = null;
+        _idleAwaitingClickStartedAt = null;
+        _idleClickTimer.Stop();
     }
     private static bool IsAnyMouseButtonDown()
     {
@@ -3703,6 +3990,9 @@ public static class MediaPlaybackMonitor
 {
     private const float SessionAudioPeakThreshold = 0.005f;
     private static readonly TimeSpan AudioDiagnosticFailureLogInterval = TimeSpan.FromMinutes(10);
+    // 轮询级诊断日志默认关闭，需要排查时设置环境变量 USAGETRACKER_VERBOSE=1
+    private static readonly bool VerboseDiagnosticsEnabled =
+        string.Equals(Environment.GetEnvironmentVariable("USAGETRACKER_VERBOSE"), "1", StringComparison.OrdinalIgnoreCase);
     private static DateTime _lastAudioDiagnosticLogAt = DateTime.MinValue;
     private static DateTime _lastAudioDiagnosticFailureLogAt = DateTime.MinValue;
     private static bool _preferDefaultAudioEndpointOnly;
@@ -4031,13 +4321,18 @@ public static class MediaPlaybackMonitor
 
     private static void LogAudioDiagnostic(MediaPlaybackSnapshot snapshot, IReadOnlyList<string> diagnosticSessions)
     {
+        if (!VerboseDiagnosticsEnabled)
+        {
+            return;
+        }
+
         if (!snapshot.HasAnyPlayback && diagnosticSessions.Count == 0)
         {
             return;
         }
 
         var now = DateTime.Now;
-        if (now - _lastAudioDiagnosticLogAt < TimeSpan.FromSeconds(5))
+        if (now - _lastAudioDiagnosticLogAt < TimeSpan.FromSeconds(30))
         {
             return;
         }

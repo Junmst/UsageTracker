@@ -19,6 +19,10 @@ public sealed class UsageTrackerRepository
     private readonly object _diskWriteLock = new();
     private DateTime _lastBackupTime = DateTime.MinValue;
     private static readonly TimeSpan BackupInterval = TimeSpan.FromMinutes(30);
+    // 备份保留上限：数据库备份总量 + 目录文件数双重限制（历史上无上限堆积到 5GB+）
+    private const long MaxDatabaseBackupTotalBytes = 1500L * 1024 * 1024;
+    private const int MaxBackupFileCount = 500;
+    private const int KeepSettingsBackupCount = 200;
 
     public static UsageTrackerRepository Create(string dataDirectory, string settingsFilePath)
     {
@@ -72,6 +76,8 @@ public sealed class UsageTrackerRepository
         EnsureColumn(connection, "UsageSessions", "ParallelActivitiesJson", "TEXT NULL");
         EnsureColumn(connection, "ActiveSession", "ParallelActivitiesJson", "TEXT NULL");
         EnsureColumn(connection, "ActiveSession", "LastCapturedAt", "TEXT NULL");
+        // 启动时顺手清理超量备份，避免备份目录长期堆积
+        PruneBackups();
     }
 
     private static void EnsureColumn(SqliteConnection connection, string tableName, string columnName, string definition)
@@ -196,6 +202,16 @@ public sealed class UsageTrackerRepository
     /// </summary>
     public void LoadHistoryForDateRange(List<UsageSessionRecord> history, DateTime fromInclusive, DateTime toExclusive)
     {
+        MergeHistoryRecords(history, QueryHistoryForDateRange(fromInclusive, toExclusive));
+    }
+
+    /// <summary>
+    /// 纯查询：读取指定日期范围的会话记录，不触碰调用方集合，
+    /// 因此可以安全地在后台线程执行（历史加载阶段就靠它避免与轮询线程争抢 List）。
+    /// </summary>
+    public List<UsageSessionRecord> QueryHistoryForDateRange(DateTime fromInclusive, DateTime toExclusive)
+    {
+        var result = new List<UsageSessionRecord>();
         using var connection = OpenDatabaseConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -212,8 +228,32 @@ public sealed class UsageTrackerRepository
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            var record = ReadSessionRecord(reader);
-            if (history.All(x => !string.Equals(x.Id, record.Id, StringComparison.OrdinalIgnoreCase)))
+            result.Add(ReadSessionRecord(reader));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 把记录合并进共享历史列表。调用方必须在同一线程内合并（后台查询请回到 UI 线程），
+    /// 否则遍历或写入与轮询线程并发会抛 "Collection was modified"。
+    /// </summary>
+    private static void MergeHistoryRecords(List<UsageSessionRecord> history, List<UsageSessionRecord> records)
+    {
+        if (records.Count == 0)
+        {
+            return;
+        }
+
+        var existingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in history)
+        {
+            existingIds.Add(item.Id);
+        }
+
+        foreach (var record in records)
+        {
+            if (existingIds.Add(record.Id))
             {
                 history.Add(record);
             }
@@ -723,16 +763,101 @@ public sealed class UsageTrackerRepository
         Directory.CreateDirectory(_backupDirectory);
         var stamp = now.ToString("yyyyMMdd-HHmm");
         CopyIfExists(_settingsFilePath, Path.Combine(_backupDirectory, $"settings-{stamp}.json"));
-        CopyIfExists(_databaseFilePath, Path.Combine(_backupDirectory, $"usage-tracker-{stamp}.db"));
-        foreach (var oldBackup in Directory.EnumerateFiles(_backupDirectory).Select(x => new FileInfo(x)).OrderByDescending(x => x.LastWriteTimeUtc).Skip(300))
+        BackupDatabaseSnapshot(Path.Combine(_backupDirectory, $"usage-tracker-{stamp}.db"));
+        PruneBackups();
+    }
+
+    /// <summary>
+    /// 用 SQLite 的 VACUUM INTO 生成一致性快照。直接 File.Copy 主库会漏掉 WAL 中未落盘的数据，
+    /// 且 26MB+ 的大库在写入过程中复制会带来明显 IO 压力；失败时回退为文件复制。
+    /// </summary>
+    private void BackupDatabaseSnapshot(string destinationPath)
+    {
+        if (!File.Exists(_databaseFilePath) || File.Exists(destinationPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var connection = OpenDatabaseConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = $"VACUUM INTO '{destinationPath.Replace("'", "''")}'";
+            command.ExecuteNonQuery();
+            return;
+        }
+        catch
         {
             try
             {
-                oldBackup.Delete();
+                if (File.Exists(destinationPath))
+                {
+                    File.Delete(destinationPath);
+                }
             }
             catch
             {
             }
+        }
+
+        CopyIfExists(_databaseFilePath, destinationPath);
+    }
+
+    /// <summary>
+    /// 备份保留策略：按总量与文件数双重上限清理，避免 backups 目录无限增长。
+    /// </summary>
+    private void PruneBackups()
+    {
+        try
+        {
+            if (!Directory.Exists(_backupDirectory))
+            {
+                return;
+            }
+
+            long totalBytes = 0;
+            foreach (var file in Directory.EnumerateFiles(_backupDirectory, "usage-tracker-*.db")
+                         .Select(x => new FileInfo(x))
+                         .OrderByDescending(x => x.LastWriteTimeUtc))
+            {
+                totalBytes += file.Length;
+                if (totalBytes <= MaxDatabaseBackupTotalBytes)
+                {
+                    continue;
+                }
+
+                TryDeleteBackup(file);
+            }
+
+            foreach (var file in Directory.EnumerateFiles(_backupDirectory, "settings-*.json")
+                         .Select(x => new FileInfo(x))
+                         .OrderByDescending(x => x.LastWriteTimeUtc)
+                         .Skip(KeepSettingsBackupCount))
+            {
+                TryDeleteBackup(file);
+            }
+
+            foreach (var file in Directory.EnumerateFiles(_backupDirectory)
+                         .Select(x => new FileInfo(x))
+                         .OrderByDescending(x => x.LastWriteTimeUtc)
+                         .Skip(MaxBackupFileCount))
+            {
+                TryDeleteBackup(file);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryDeleteBackup(FileInfo file)
+    {
+        try
+        {
+            file.Delete();
+        }
+        catch
+        {
         }
     }
 
