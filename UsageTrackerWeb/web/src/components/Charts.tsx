@@ -1,12 +1,11 @@
 import { useEffect, useRef } from 'react';
 import * as echarts from 'echarts';
 import type { BucketStat, DailyPoint } from '../lib/api';
-import { formatHoursMinutes, parseDateKey } from '../lib/format';
+import { formatHoursMinutes } from '../lib/format';
 import type { ThemeColors } from '../theme';
 
 interface ChartTheme {
   panel: string;
-  panelAlt: string;
   border: string;
   textPrimary: string;
   textSecondary: string;
@@ -18,7 +17,6 @@ interface ChartTheme {
 function getChartTheme(theme: ThemeColors): ChartTheme {
   return {
     panel: theme.panel,
-    panelAlt: theme.panelAlt,
     border: theme.border,
     textPrimary: theme.textPrimary,
     textSecondary: theme.textSecondary,
@@ -30,12 +28,14 @@ function getChartTheme(theme: ThemeColors): ChartTheme {
 
 export function TrendChart({ data, theme }: { data: DailyPoint[]; theme: ThemeColors }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const colors = getChartTheme(theme);
     const chart = echarts.init(host);
+    chartRef.current = chart;
     const gradient = new echarts.graphic.LinearGradient(0, 0, 0, 1, [
       { offset: 0, color: colors.accent },
       { offset: 1, color: colors.accentSoft },
@@ -43,7 +43,10 @@ export function TrendChart({ data, theme }: { data: DailyPoint[]; theme: ThemeCo
 
     chart.setOption({
       backgroundColor: 'transparent',
+      animation: true,
       animationDuration: 650,
+      animationDurationUpdate: 900,
+      animationEasingUpdate: 'cubicInOut',
       grid: { left: 52, right: 18, top: 24, bottom: 34, containLabel: false },
       tooltip: {
         trigger: 'axis',
@@ -86,7 +89,6 @@ export function TrendChart({ data, theme }: { data: DailyPoint[]; theme: ThemeCo
           type: 'bar',
           data: data.map((x) => Math.round(x.seconds)),
           barMaxWidth: 22,
-          barMinHeight: 3,
           showBackground: true,
           backgroundStyle: { color: colors.categoryCard, borderRadius: [6, 6, 0, 0] },
           itemStyle: {
@@ -114,8 +116,18 @@ export function TrendChart({ data, theme }: { data: DailyPoint[]; theme: ThemeCo
       window.removeEventListener('resize', resize);
       observer.disconnect();
       chart.dispose();
+      chartRef.current = null;
     };
-  }, [data, theme]);
+  }, [theme]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.setOption({
+      xAxis: { data: data.map((x) => x.date.slice(5)) },
+      series: [{ data: data.map((x) => Math.round(x.seconds)) }],
+    });
+  }, [data]);
 
   return <div className="chart-host trend-chart-host" ref={hostRef} />;
 }
@@ -130,12 +142,14 @@ export function RankingChart({
   theme: ThemeColors;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const colors = getChartTheme(theme);
     const chart = echarts.init(host);
+    chartRef.current = chart;
     const sorted = [...data].reverse();
     const gradient = new echarts.graphic.LinearGradient(0, 0, 1, 0, [
       { offset: 0, color: colors.accentSoft },
@@ -144,19 +158,25 @@ export function RankingChart({
 
     chart.setOption({
       backgroundColor: 'transparent',
+      animation: true,
       animationDuration: 650,
-      grid: { left: 8, right: 64, top: 12, bottom: 12, containLabel: true },
+      animationDurationUpdate: 700,
+      animationEasingUpdate: 'cubicInOut',
+      grid: { left: 16, right: 64, top: 8, bottom: 28, containLabel: true },
       tooltip: {
         trigger: 'item',
+        appendToBody: true,
+        confine: false,
         backgroundColor: colors.panel,
         borderColor: colors.border,
         borderWidth: 1,
         padding: [9, 12],
         textStyle: { color: colors.textPrimary, fontSize: 12 },
         formatter: (params: unknown) => {
-          const item = params as { name: string; value: number; dataIndex: number };
-          const stat = sorted[item.dataIndex];
-          return `${item.name}<br/><span style="color:${colors.accent}">●</span> ${formatHoursMinutes(item.value)} · ${stat.sessionCount} 次`;
+          const raw = Array.isArray(params) ? params[0] : params;
+          const item = raw as { name: string; value: number; data?: { sessionCount?: number } };
+          const sessionCount = item.data?.sessionCount ?? 0;
+          return `${item.name}<br/><span style="color:${colors.accent}">●</span> ${formatHoursMinutes(item.value)} · ${sessionCount} 次`;
         },
       },
       xAxis: {
@@ -175,12 +195,15 @@ export function RankingChart({
         data: sorted.map((x) => x.key),
         axisLine: { show: false },
         axisTick: { show: false },
-        axisLabel: { color: colors.textSecondary, fontSize: 11, width: 120, overflow: 'truncate' },
+        axisLabel: { show: false },
       },
       series: [
         {
           type: 'bar',
-          data: sorted.map((x) => Math.round(x.seconds)),
+          data: sorted.map((x) => ({
+            value: Math.round(x.seconds),
+            sessionCount: x.sessionCount,
+          })),
           itemStyle: {
             color: gradient,
             borderRadius: [0, 7, 7, 0],
@@ -200,8 +223,9 @@ export function RankingChart({
           },
           emphasis: {
             itemStyle: {
-              shadowBlur: 16,
+              shadowBlur: 18,
               shadowColor: colors.accent,
+              shadowOffsetX: 3,
             },
           },
         },
@@ -216,8 +240,24 @@ export function RankingChart({
       window.removeEventListener('resize', resize);
       observer.disconnect();
       chart.dispose();
+      chartRef.current = null;
     };
-  }, [data, theme]);
+  }, [theme]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const sorted = [...data].reverse();
+    chart.setOption({
+      yAxis: { data: sorted.map((x) => x.key) },
+      series: [{
+        data: sorted.map((x) => ({
+          value: Math.round(x.seconds),
+          sessionCount: x.sessionCount,
+        })),
+      }],
+    });
+  }, [data]);
 
   return (
     <div className="panel ranking-chart-panel">
@@ -225,9 +265,4 @@ export function RankingChart({
       <div className="chart-host ranking-chart-host" ref={hostRef} />
     </div>
   );
-}
-
-export function formatDateLabelShort(key: string): string {
-  const date = parseDateKey(key);
-  return `${date.getMonth() + 1}/${date.getDate()}`;
 }

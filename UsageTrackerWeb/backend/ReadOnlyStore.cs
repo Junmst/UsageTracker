@@ -77,7 +77,7 @@ public sealed class ReadOnlyStore
     }
 
     /// <summary>与 [start, end) 相交的未删除会话，SQL 语义与桌面版一致。</summary>
-    public List<SessionDto> GetSessionsIntersecting(DateTime start, DateTime end)
+    public List<SessionDto> GetSessionsIntersecting(DateTime start, DateTime end, Func<SessionDto, bool>? filter = null)
     {
         if (!DatabaseExists)
         {
@@ -98,7 +98,8 @@ public sealed class ReadOnlyStore
         command.Parameters.AddWithValue("$end", Iso(end));
         command.Parameters.AddWithValue("$now", Iso(DateTime.Now));
         using var reader = command.ExecuteReader();
-        return ReadSessions(reader);
+        var sessions = ReadSessions(reader);
+        return filter is null ? sessions : sessions.Where(filter).ToList();
     }
 
     private static double SumSeconds(IEnumerable<SessionDto> sessions, DateTime start, DateTime end)
@@ -112,12 +113,12 @@ public sealed class ReadOnlyStore
         return ticks / 10_000_000.0;
     }
 
-    public double GetSecondsInRange(DateTime start, DateTime end)
-        => SumSeconds(GetSessionsIntersecting(start, end), start, end);
+    public double GetSecondsInRange(DateTime start, DateTime end, Func<SessionDto, bool>? filter = null)
+        => SumSeconds(GetSessionsIntersecting(start, end, filter), start, end);
 
-    public List<BucketStatDto> GetProcessStats(DateTime start, DateTime end)
+    public List<BucketStatDto> GetProcessStats(DateTime start, DateTime end, Func<SessionDto, bool>? filter = null)
     {
-        var sessions = GetSessionsIntersecting(start, end);
+        var sessions = GetSessionsIntersecting(start, end, filter);
         return sessions
             .GroupBy(x => string.IsNullOrWhiteSpace(x.ProcessName) ? "未知" : x.ProcessName,
                      StringComparer.OrdinalIgnoreCase)
@@ -131,9 +132,9 @@ public sealed class ReadOnlyStore
             .ToList();
     }
 
-    public List<BucketStatDto> GetSubjectStats(DateTime start, DateTime end)
+    public List<BucketStatDto> GetSubjectStats(DateTime start, DateTime end, Func<SessionDto, bool>? filter = null)
     {
-        var sessions = GetSessionsIntersecting(start, end);
+        var sessions = GetSessionsIntersecting(start, end, filter);
         return sessions
             .GroupBy(x => string.IsNullOrWhiteSpace(x.ManualSubject) ? "未分类" : x.ManualSubject!)
             .Select(g => new BucketStatDto
@@ -150,7 +151,7 @@ public sealed class ReadOnlyStore
     /// 每日时长序列。只做一次范围查询，再按会话实际跨越的天数分摊，
     /// 避免逐日查库（2 年数据就是 700+ 次查询）。
     /// </summary>
-    public List<DailyPointDto> GetDailySeries(DateTime fromDate, DateTime toDate)
+    public List<DailyPointDto> GetDailySeries(DateTime fromDate, DateTime toDate, Func<SessionDto, bool>? filter = null)
     {
         var buckets = new Dictionary<string, double>();
         for (var date = fromDate.Date; date <= toDate.Date; date = date.AddDays(1))
@@ -164,7 +165,7 @@ public sealed class ReadOnlyStore
                           .OrderBy(x => x.Date).ToList();
         }
 
-        var sessions = GetSessionsIntersecting(UsageTimeRange.GetDayStart(fromDate), UsageTimeRange.GetDayEnd(toDate));
+        var sessions = GetSessionsIntersecting(UsageTimeRange.GetDayStart(fromDate), UsageTimeRange.GetDayEnd(toDate), filter);
         foreach (var session in sessions)
         {
             var effectiveEnd = session.EndTime ?? DateTime.Now;
@@ -186,6 +187,15 @@ public sealed class ReadOnlyStore
 
         return buckets.Select(x => new DailyPointDto { Date = x.Key, Seconds = x.Value })
                       .OrderBy(x => x.Date).ToList();
+    }
+
+    public string GetSearchVersion()
+    {
+        if (!DatabaseExists) return string.Empty;
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COALESCE(MAX(StartTime), '') || ':' || COUNT(*) || ':' || COALESCE((SELECT EndTime FROM UsageSessions WHERE IsDeleted = 0 ORDER BY StartTime DESC LIMIT 1), '') FROM UsageSessions WHERE IsDeleted = 0";
+        return Convert.ToString(command.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
     }
 
     public SearchResultDto Search(string? keyword, int skip, int take)
@@ -262,13 +272,33 @@ public sealed class ReadOnlyStore
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT Id, ProcessName, WindowTitle, StartTime, EndTime, ManualSubject
+            SELECT Id, ProcessName, WindowTitle, StartTime, EndTime, ManualSubject, LastCapturedAt
             FROM ActiveSession
             WHERE SingletonId = 1
             """;
         using var reader = command.ExecuteReader();
-        var items = ReadSessions(reader);
-        return items.Count > 0 ? items[0] : null;
+        if (!reader.Read()) return null;
+
+        var lastCapturedAt = ParseTime(reader.GetValue(6));
+        if (lastCapturedAt is null || DateTime.Now - lastCapturedAt.Value > TimeSpan.FromSeconds(5))
+        {
+            return null;
+        }
+
+        var start = ParseTime(reader.GetValue(3)) ?? DateTime.MinValue;
+        var end = ParseTime(reader.GetValue(4));
+        var effectiveEnd = end ?? DateTime.Now;
+        return new SessionDto
+        {
+            Id = Text(reader, 0),
+            ProcessName = Text(reader, 1),
+            WindowTitle = Text(reader, 2),
+            StartTime = start,
+            EndTime = end,
+            ManualSubject = reader.IsDBNull(5) ? null : reader.GetString(5),
+            LastCapturedAt = lastCapturedAt,
+            DurationSeconds = effectiveEnd > start ? (effectiveEnd - start).TotalSeconds : 0
+        };
     }
 
     public DateTime? GetEarliestDate()

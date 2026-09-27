@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { RankingChart, TrendChart } from '../components/Charts';
+import LoadingTransition from '../components/LoadingTransition';
+import SubjectFilterMenu from '../components/SubjectFilterMenu';
 import { api } from '../lib/api';
-import type { BucketStat, DailyPoint, Overview, RangeSummary } from '../lib/api';
-import { formatClock, formatDateKey, formatDateLabel, formatHoursMinutes, parseDateKey } from '../lib/format';
+import type { BucketStat, DailyPoint, Overview, RangeSummary, SubjectDefinition } from '../lib/api';
+import { formatDateKey, formatDurationShort, formatHoursMinutes, parseDateKey } from '../lib/format';
 import type { ThemeController } from '../theme';
 
 interface Props {
@@ -11,10 +13,13 @@ interface Props {
   theme: ThemeController;
   overviewRange: RangeSummary | null;
   onOverviewRangeChange: (range: RangeSummary | null) => void;
+  subjects: SubjectDefinition[];
+  refreshToken: number;
 }
 
-export default function OverviewPage({ date, theme, overviewRange, onOverviewRangeChange }: Props) {
+export default function OverviewPage({ date, theme, overviewRange, onOverviewRangeChange, subjects, refreshToken }: Props) {
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [subjectFilter, setSubjectFilter] = useState<string | null>(null);
   const [daily, setDaily] = useState<DailyPoint[]>([]);
   const [top, setTop] = useState<BucketStat[]>([]);
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -38,9 +43,46 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
   }, [overviewRange]);
 
   useEffect(() => {
+    if (!overviewRange) return;
     let cancelled = false;
-    const load = () => {
-      void Promise.all([api.overview(date), api.daily(30), api.ranking(date, 'process', 10)])
+    void api.rangeSummary(overviewRange.from, overviewRange.to, subjectFilter)
+      .then((range) => {
+        if (cancelled) return;
+        setRangeResult(range);
+        onOverviewRangeChange(range);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [subjectFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadActive = () => {
+      void api.active(subjectFilter, true)
+        .then((active) => {
+          if (cancelled) return;
+          setOverview((current) => current ? { ...current, active } : current);
+        })
+        .catch(() => undefined);
+    };
+    loadActive();
+    const activeTimer = window.setInterval(loadActive, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(activeTimer);
+    };
+  }, [subjectFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = (forceRefresh = false) => {
+      void Promise.all([
+        api.overview(date, subjectFilter, forceRefresh),
+        api.daily(30, subjectFilter, forceRefresh),
+        api.ranking(date, 'process', 10, subjectFilter, forceRefresh),
+      ])
         .then(([o, d, r]) => {
           if (cancelled) return;
           setOverview(o);
@@ -49,19 +91,31 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
         })
         .catch(() => undefined);
     };
-    load();
-    const timer = window.setInterval(load, 10000);
+    load(refreshToken > 0);
+    const timer = window.setInterval(() => load(true), 10000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [date]);
+  }, [date, subjectFilter, refreshToken]);
 
+  const fallbackOverview: Overview = {
+    date,
+    todaySeconds: 0,
+    weekSeconds: 0,
+    monthSeconds: 0,
+    totalSeconds: 0,
+    trackedDays: 0,
+    sessionCount: 0,
+    databaseSizeMb: 0,
+    active: null,
+  };
+  const displayedOverview = overview ?? fallbackOverview;
   const isRangeMode = overviewRange !== null;
   const displayDaily = overviewRange?.daily ?? daily;
   const displayTop = overviewRange?.ranking ?? top;
   const topProcess = useMemo(() => displayTop[0], [displayTop]);
-  const todayKey = overview?.date ?? formatDateKey(new Date());
+  const todayKey = displayedOverview.date;
 
   const openCalendarModal = () => {
     setCalendarMounted(true);
@@ -101,7 +155,7 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
     setRangeLoading(true);
     setRangeError('');
     try {
-      const result = await api.rangeSummary(rangeFrom, rangeTo);
+      const result = await api.rangeSummary(rangeFrom, rangeTo, subjectFilter);
       setRangeResult(result);
       onOverviewRangeChange(result);
       closeRangeModal();
@@ -129,19 +183,14 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
     }));
   }, [displayDaily, overview?.date, overviewRange?.to]);
 
-  if (!overview) {
-    return <div className="loading">加载中…</div>;
-  }
-
-  const active = overview.active;
+  const active = displayedOverview.active;
   const activeTitle = active?.windowTitle || active?.processName || '当前无活动会话';
-  const displayTotalSeconds = overviewRange?.seconds ?? overview.totalSeconds;
-  const displayTrackedDays = overviewRange?.trackedDays ?? overview.trackedDays;
-  const displaySessionCount = overviewRange?.sessionCount ?? overview.sessionCount;
-  const displayDateLabel = overviewRange
-    ? `${overviewRange.from} → ${overviewRange.to}`
-    : formatDateLabel(parseDateKey(overview.date));
-  const activeElapsed = active ? formatClock(new Date(clockNow)) : '';
+  const displayTotalSeconds = overviewRange?.seconds ?? displayedOverview.totalSeconds;
+  const displayTrackedDays = overviewRange?.trackedDays ?? displayedOverview.trackedDays;
+  const displaySessionCount = overviewRange?.sessionCount ?? displayedOverview.sessionCount;
+  const activeElapsed = active
+    ? formatDurationShort(Math.max(0, (clockNow - new Date(active.startTime).getTime()) / 1000))
+    : '';
   const rangeAverageSeconds = overviewRange && overviewRange.trackedDays > 0
     ? overviewRange.seconds / overviewRange.trackedDays
     : 0;
@@ -153,16 +202,24 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
   };
 
   return (
+    <LoadingTransition loading={!overview} className="overview-loading-transition">
     <div className="page overview-page">
       <div className="page-header overview-page-header">
         <div>
           <div className="page-kicker">TIME INSIGHT · DAILY BRIEF</div>
           <h2>总览</h2>
-          <div className="page-subtitle">{displayDateLabel} · {isRangeMode ? '区间统计模式' : '你的时间使用脉络'}</div>
+          <div className="page-subtitle">{isRangeMode ? '区间统计模式' : '你的时间使用脉络'}</div>
         </div>
-        <div className={`overview-live-status${isRangeMode ? ' is-active range-status' : active ? ' is-active' : ''}`}>
-          <span className="status-pulse" />
-          {isRangeMode ? '正在查看自定义区间' : active ? `正在使用 · ${activeElapsed}` : '当前无活动会话'}
+        <div className="overview-header-controls">
+          <div className="overview-date-status-row">
+            <div className={`overview-live-status${isRangeMode ? ' is-active range-status' : active ? ' is-active' : ''}`}>
+              <span className="status-pulse" />
+              {isRangeMode ? '正在查看自定义区间' : active ? `正在使用 · ${activeElapsed}` : '当前无活动会话'}
+            </div>
+          </div>
+          <div className="overview-action-row overview-category-row">
+            <SubjectFilterMenu subjects={subjects} value={subjectFilter} onChange={setSubjectFilter} />
+          </div>
         </div>
       </div>
 
@@ -171,12 +228,12 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
           <span className="eyebrow">{isRangeMode ? 'CUSTOM RANGE' : "TODAY'S RHYTHM"}</span>
           <h3>{isRangeMode ? '区间数据已更新' : active ? '专注正在继续' : '今天的记录已准备好'}</h3>
           <p title={activeTitle}>
-            {isRangeMode ? `${overviewRange.from} 至 ${overviewRange.to} · ${displaySessionCount.toLocaleString()} 条会话` : active ? activeTitle : `已累计记录 ${overview.sessionCount.toLocaleString()} 条使用会话`}
+            {isRangeMode ? `${overviewRange.from} 至 ${overviewRange.to} · ${displaySessionCount.toLocaleString()} 条会话` : active ? activeTitle : `已累计记录 ${displayedOverview.sessionCount.toLocaleString()} 条使用会话`}
           </p>
         </div>
         <div className="overview-hero-focus">
           <span>{isRangeMode ? '区间总使用' : '今日使用'}</span>
-          <strong>{formatHoursMinutes(isRangeMode ? displayTotalSeconds : overview.todaySeconds)}</strong>
+          <strong>{formatHoursMinutes(isRangeMode ? displayTotalSeconds : displayedOverview.todaySeconds)}</strong>
           <small>{topProcess ? `最常使用 · ${topProcess.key}` : '等待更多活动数据'}</small>
         </div>
         <div className="overview-hero-orbit" aria-hidden="true">
@@ -186,34 +243,7 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
         </div>
       </section>
 
-      <div className="card-grid overview-metrics">
-        <div className="stat-card primary-stat">
-          <div className="stat-card-top"><span className="label">{isRangeMode ? '区间总时长' : '今日'}</span><span className="stat-card-mark">◷</span></div>
-          <div className="value accent">{formatHoursMinutes(isRangeMode ? displayTotalSeconds : overview.todaySeconds)}</div>
-          <div className="hint">{isRangeMode ? `${overviewRange.from} → ${overviewRange.to}` : `${overview.date} · 日界线 04:00`}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-top"><span className="label">{isRangeMode ? '日均时长' : '本周'}</span><span className="stat-card-mark">⌁</span></div>
-          <div className="value">{formatHoursMinutes(isRangeMode ? rangeAverageSeconds : overview.weekSeconds)}</div>
-          <div className="hint">{isRangeMode ? `基于 ${displayTrackedDays} 个有记录日` : '周一起算'}</div>
-        </div>
-        <button className="stat-card month-stat-card" onClick={openCalendarModal}>
-          <div className="stat-card-top"><span className="label">{isRangeMode ? '区间天数' : '本月'}</span><span className="stat-card-mark">▦</span></div>
-          <div className="value">{isRangeMode ? displayTrackedDays : formatHoursMinutes(overview.monthSeconds)}</div>
-          <div className="hint">{isRangeMode ? '有使用记录的天数' : `${overview.date.slice(0, 7)} · 点击查看 30 天`}</div>
-        </button>
-        <button className="stat-card cumulative-stat-card" onClick={openRangeModal}>
-          <div className="stat-card-top"><span className="label">{isRangeMode ? '当前区间' : '累计'}</span><span className="stat-card-mark">✦</span></div>
-          <div className="value">{isRangeMode ? displaySessionCount.toLocaleString() : formatHoursMinutes(overview.totalSeconds)}</div>
-          <div className="hint">{isRangeMode ? '条会话 · 点击修改区间' : `自 ${overview.earliestDate ?? '—'} · 点击选择区间`}</div>
-        </button>
-        <div className="stat-card">
-          <div className="stat-card-top"><span className="label">{isRangeMode ? '应用数量' : '记录天数'}</span><span className="stat-card-mark">◇</span></div>
-          <div className="value">{isRangeMode ? overviewRange.processCount : overview.trackedDays}</div>
-          <div className="hint">{isRangeMode ? '区间内使用过的进程' : `共 ${overview.sessionCount.toLocaleString()} 条会话`}</div>
-        </div>
-      </div>
-
+      <div className="overview-data-content">
       <div className="overview-chart-grid">
         <section className="panel overview-trend-panel">
           <div className="chart-heading">
@@ -228,12 +258,42 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
         <RankingChart data={displayTop} title={isRangeMode ? '区间应用排行' : '今日应用排行'} theme={theme.colors} />
       </div>
 
+      <div className="card-grid overview-metrics">
+        <div className="stat-card">
+          <div className="stat-card-top"><span className="label">{isRangeMode ? '区间总时长' : '今日'}</span><span className="stat-card-mark">◷</span></div>
+          <div className="value accent">{formatHoursMinutes(isRangeMode ? displayTotalSeconds : displayedOverview.todaySeconds)}</div>
+          <div className="hint">{isRangeMode ? `${overviewRange.from} → ${overviewRange.to}` : `${displayedOverview.date} · 日界线 04:00`}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-card-top"><span className="label">{isRangeMode ? '日均时长' : '本周'}</span><span className="stat-card-mark">⌁</span></div>
+          <div className="value">{formatHoursMinutes(isRangeMode ? rangeAverageSeconds : displayedOverview.weekSeconds)}</div>
+          <div className="hint">{isRangeMode ? `基于 ${displayTrackedDays} 个有记录日` : '周一起算'}</div>
+        </div>
+        <button className="stat-card month-stat-card" onClick={openCalendarModal}>
+          <div className="stat-card-top"><span className="label">{isRangeMode ? '区间天数' : '本月'}</span><span className="stat-card-mark">▦</span></div>
+          <div className="value">{isRangeMode ? displayTrackedDays : formatHoursMinutes(displayedOverview.monthSeconds)}</div>
+          <div className="hint">{isRangeMode ? '有使用记录的天数' : `${displayedOverview.date.slice(0, 7)} · 点击查看 30 天`}</div>
+        </button>
+        <button className="stat-card cumulative-stat-card" onClick={openRangeModal}>
+          <div className="stat-card-top"><span className="label">{isRangeMode ? '当前区间' : '累计'}</span><span className="stat-card-mark">✦</span></div>
+          <div className="value">{isRangeMode ? displaySessionCount.toLocaleString() : formatHoursMinutes(displayedOverview.totalSeconds)}</div>
+          <div className="hint">{isRangeMode ? '条会话 · 点击修改区间' : `自 ${displayedOverview.earliestDate ?? '—'} · 点击选择区间`}</div>
+        </button>
+        <div className="stat-card">
+          <div className="stat-card-top"><span className="label">{isRangeMode ? '应用数量' : '记录天数'}</span><span className="stat-card-mark">◇</span></div>
+          <div className="value">{isRangeMode ? overviewRange.processCount : displayedOverview.trackedDays}</div>
+          <div className="hint">{isRangeMode ? '区间内使用过的进程' : `共 ${displayedOverview.sessionCount.toLocaleString()} 条会话`}</div>
+        </div>
+      </div>
+
       {isRangeMode && (
         <div className="range-mode-bar">
           <span>当前页面正在显示：{overviewRange.from} → {overviewRange.to}</span>
           <button className="toolbar-button" onClick={resetRangeMode}>恢复默认总览          </button>
         </div>
       )}
+
+      </div>
 
       {calendarMounted && (
         <div className={`calendar-modal-backdrop${calendarOpen ? ' modal-open' : ' modal-closing'}`} onMouseDown={closeCalendarModal}>
@@ -324,5 +384,6 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
         </div>
       )}
     </div>
+    </LoadingTransition>
   );
 }

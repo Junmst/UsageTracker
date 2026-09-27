@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import DatePickerPopover from './components/DatePickerPopover';
 import DistributionPage from './pages/DistributionPage';
@@ -9,7 +9,8 @@ import StatsPage from './pages/StatsPage';
 import { api } from './lib/api';
 import type { RangeSummary, SettingsSnapshot } from './lib/api';
 import { formatDateKey, formatDateLabel, getTimeDistributionDate, parseDateKey } from './lib/format';
-import { FALLBACK_ACCENTS, useTheme } from './theme';
+import { useTheme } from './theme';
+import type { DistributionMergeMode } from './components/TimeDistribution';
 
 export default function App() {
   const [page, setPage] = useState('overview');
@@ -17,6 +18,10 @@ export default function App() {
   const [date, setDate] = useState(() => formatDateKey(getTimeDistributionDate(new Date())));
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
   const [overviewRange, setOverviewRange] = useState<RangeSummary | null>(null);
+  const [overviewRefreshToken, setOverviewRefreshToken] = useState(0);
+  const [distributionMergeMode, setDistributionMergeMode] = useState<DistributionMergeMode>(() =>
+    (localStorage.getItem('shiji-distribution-merge-mode') as DistributionMergeMode | null) ?? 'process'
+  );
   const theme = useTheme(settings?.themeAccentColor);
 
   useEffect(() => {
@@ -67,15 +72,8 @@ export default function App() {
     };
   }, []);
 
-  const palette = useMemo(() => {
-    const combined = [
-      ...(settings?.themeAccentSlots ?? []),
-      ...(settings?.themeAccentRecentColors ?? []),
-    ].filter((value, index, array) => array.indexOf(value) === index);
-    return combined.length > 0 ? combined : FALLBACK_ACCENTS;
-  }, [settings]);
-
-  const showDatePicker = page === 'overview' || page === 'process' || page === 'subject';
+  const showOverviewDatePicker = page === 'overview';
+  const showStatsDatePicker = page === 'process' || page === 'subject';
   const selectPage = (nextPage: string) => {
     setPage(nextPage);
     setMountedPages((current) => {
@@ -102,8 +100,23 @@ export default function App() {
       <Sidebar active={page} onSelect={selectPage} />
       <main className={`content${page === 'distribution' ? ' content-fixed' : ''}`}>
         <div className="page-transition-layer">
-        {showDatePicker && (
-          <div className="content-toolbar">
+        {showOverviewDatePicker && (
+          <div className="content-toolbar overview-global-toolbar">
+            <DatePickerPopover value={date} onChange={setDate} />
+            <span className="toolbar-hint">{formatDateLabel(parseDateKey(date))}</span>
+            <button
+              className="toolbar-button"
+              onClick={() => {
+                setDate(formatDateKey(getTimeDistributionDate(new Date())));
+                setOverviewRefreshToken((value) => value + 1);
+              }}
+            >
+              今天
+            </button>
+          </div>
+        )}
+        {showStatsDatePicker && (
+          <div className="content-toolbar stats-global-toolbar">
             <DatePickerPopover value={date} onChange={setDate} />
             <span className="toolbar-hint">{formatDateLabel(parseDateKey(date))}</span>
             <button
@@ -121,6 +134,8 @@ export default function App() {
             theme={theme}
             overviewRange={overviewRange}
             onOverviewRangeChange={setOverviewRange}
+            subjects={settings?.subjectDefinitions ?? []}
+            refreshToken={overviewRefreshToken}
           />
         ))}
         {cachedPage('sessions', <SessionsPage />)}
@@ -129,6 +144,7 @@ export default function App() {
             active={page === 'distribution'}
             theme={theme}
             subjects={settings?.subjectDefinitions ?? []}
+            mergeMode={distributionMergeMode}
           />
         ))}
         {cachedPage('process', <StatsPage kind="process" date={date} theme={theme} />)}
@@ -144,7 +160,16 @@ export default function App() {
             <SubjectStructure definitions={settings?.subjectDefinitions ?? []} />
           </div>
         ))}
-        {cachedPage('settings', <SettingsPage theme={theme} palette={palette} />)}
+        {cachedPage('settings', (
+          <SettingsPage
+            theme={theme}
+            distributionMergeMode={distributionMergeMode}
+            onDistributionMergeModeChange={(value) => {
+              setDistributionMergeMode(value);
+              localStorage.setItem('shiji-distribution-merge-mode', value);
+            }}
+          />
+        ))}
         </div>
       </main>
     </div>

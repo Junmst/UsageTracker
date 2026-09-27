@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import LoadingTransition from '../components/LoadingTransition';
 import { api } from '../lib/api';
 import type { BucketStat, SubjectNodeDto } from '../lib/api';
 import { formatHoursMinutes, formatDateLabel, parseDateKey } from '../lib/format';
@@ -183,9 +184,8 @@ export default function StatsPage({ kind, date, theme }: Props) {
         </div>
       </div>
 
-      {loading ? (
-        <div className="panel loading-state">加载中…</div>
-      ) : kind === 'process' ? (
+      <LoadingTransition loading={loading} className="stats-loading-transition">
+        {kind === 'process' ? (
         <div className="panel stat-list">
           <div className="list-caption">
             <span>应用使用排行</span>
@@ -238,6 +238,7 @@ export default function StatsPage({ kind, date, theme }: Props) {
           )}
         </div>
       )}
+      </LoadingTransition>
     </div>
   );
 }

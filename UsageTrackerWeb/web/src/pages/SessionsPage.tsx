@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import LoadingTransition from '../components/LoadingTransition';
 import { api } from '../lib/api';
 import type { SessionDto } from '../lib/api';
 import { formatDurationShort, formatHoursMinutes } from '../lib/format';
@@ -11,27 +12,58 @@ export default function SessionsPage() {
   const [items, setItems] = useState<SessionDto[]>([]);
   const [total, setTotal] = useState(0);
   const [skip, setSkip] = useState(0);
+  const [pageInput, setPageInput] = useState('1');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    void api
-      .search(query, skip, PAGE_SIZE)
-      .then((result) => {
+    let version = '';
+    const load = async (force = false) => {
+      try {
+        const current = await api.searchVersion(true);
+        if (!force && current.version === version) return;
+        version = current.version;
+        setLoading(true);
+        const result = await api.search(query, skip, PAGE_SIZE, true);
         if (cancelled) return;
         setItems(result.items);
         setTotal(result.totalCount);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+      } catch {
+        // 保留当前列表，等待下一轮检测。
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void load(true);
+    const timer = window.setInterval(() => void load(), 5000);
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
     };
   }, [query, skip]);
 
   const pageIndex = Math.floor(skip / PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  useEffect(() => {
+    setPageInput(String(pageIndex + 1));
+  }, [pageIndex]);
+
+  const jumpToPage = () => {
+    const requested = Number.parseInt(pageInput, 10);
+    if (!Number.isFinite(requested)) {
+      setPageInput(String(pageIndex + 1));
+      return;
+    }
+    const target = Math.min(pageCount, Math.max(1, requested));
+    setPageInput(String(target));
+    setSkip((target - 1) * PAGE_SIZE);
+  };
+
   const runningCount = items.filter((item) => !item.endTime).length;
   const visibleSeconds = items.reduce((sum, item) => {
     const start = new Date(item.startTime);
@@ -91,6 +123,7 @@ export default function SessionsPage() {
         </div>
       </div>
 
+      <LoadingTransition loading={loading} className="sessions-loading-transition">
       <div className="panel session-table-shell">
         <div className="session-table">
           <div className="session-row session-head">
@@ -126,10 +159,10 @@ export default function SessionsPage() {
               </div>
             );
           })}
-          {loading && <div className="loading loading-inline">正在加载记录…</div>}
           {!loading && items.length === 0 && <div className="loading loading-inline">没有匹配的记录</div>}
         </div>
       </div>
+      </LoadingTransition>
 
       <div className="pager">
         <button
@@ -139,7 +172,18 @@ export default function SessionsPage() {
         >
           ← 上一页
         </button>
-        <span className="pager-current">{pageIndex + 1}</span>
+        <input
+          className="pager-input"
+          aria-label="跳转页码"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={pageInput}
+          onChange={(event) => setPageInput(event.target.value.replace(/\D/g, ''))}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') jumpToPage();
+          }}
+          onBlur={jumpToPage}
+        />
         <span className="pager-total">/ {pageCount}</span>
         <button
           className="toolbar-button"

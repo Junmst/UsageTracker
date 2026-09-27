@@ -5,6 +5,7 @@ export interface SessionDto {
   startTime: string;
   endTime?: string | null;
   manualSubject?: string | null;
+  lastCapturedAt?: string | null;
   durationSeconds?: number;
 }
 
@@ -134,12 +135,14 @@ async function send<T>(url: string, method: 'POST' | 'DELETE', body?: unknown): 
 
 export const api = {
   meta: () => get<Meta>('/api/meta'),
-  overview: (date?: string) => get<Overview>(`/api/overview${date ? `?date=${date}` : ''}`),
-  daily: (days: number) => get<DailyPoint[]>(`/api/daily?days=${days}`),
-  rangeSummary: (from: string, to: string) =>
-    get<RangeSummary>(`/api/range-summary?from=${from}&to=${to}`),
-  ranking: (date: string, type: 'process' | 'subject', top = 12) =>
-    get<BucketStat[]>(`/api/ranking?date=${date}&type=${type}&top=${top}`),
+  overview: (date?: string, subject?: string | null, forceRefresh = false) =>
+    get<Overview>(`/api/overview?${new URLSearchParams({ ...(date ? { date } : {}), ...(subject ? { subject } : {}) })}`, 15_000, forceRefresh),
+  daily: (days: number, subject?: string | null, forceRefresh = false) =>
+    get<DailyPoint[]>(`/api/daily?${new URLSearchParams({ days: String(days), ...(subject ? { subject } : {}) })}`, 15_000, forceRefresh),
+  rangeSummary: (from: string, to: string, subject?: string | null, forceRefresh = false) =>
+    get<RangeSummary>(`/api/range-summary?${new URLSearchParams({ from, to, ...(subject ? { subject } : {}) })}`, 15_000, forceRefresh),
+  ranking: (date: string, type: 'process' | 'subject', top = 12, subject?: string | null, forceRefresh = false) =>
+    get<BucketStat[]>(`/api/ranking?${new URLSearchParams({ date, type, top: String(top), ...(subject ? { subject } : {}) })}`, 15_000, forceRefresh),
   distribution: (from?: string, to?: string, forceRefresh = false) =>
     get<DistributionResponse>(
       `/api/distribution${from ? `?from=${from}&to=${to ?? from}` : ''}`,
@@ -148,9 +151,16 @@ export const api = {
     ),
   subjectTree: (date: string) => get<SubjectNodeDto[]>(`/api/subject-tree?date=${date}`),
   settings: () => get<SettingsSnapshot>('/api/settings'),
-  search: (q: string, skip = 0, take = 50) =>
-    get<SearchResult>(`/api/search?q=${encodeURIComponent(q)}&skip=${skip}&take=${take}`),
-  active: () => get<SessionDto | null>('/api/active'),
+  searchVersion: (forceRefresh = false) =>
+    get<{ version: string }>('/api/search-version', 0, forceRefresh),
+  search: (q: string, skip = 0, take = 50, forceRefresh = false) =>
+    get<SearchResult>(
+      `/api/search?q=${encodeURIComponent(q)}&skip=${skip}&take=${take}`,
+      15_000,
+      forceRefresh
+    ),
+  active: (subject?: string | null, forceRefresh = false) =>
+    get<SessionDto | null>(`/api/active?${new URLSearchParams(subject ? { subject } : {})}`, 0, forceRefresh),
   webPreferences: () => get<WebPreferences>('/api/web-preferences', 60_000),
   saveOverviewRange: (from: string, to: string) =>
     send<WebPreferences>('/api/web-preferences/range', 'POST', { from, to }),

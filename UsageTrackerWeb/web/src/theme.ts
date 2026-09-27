@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-export type ThemeMode = 'dark' | 'light';
+export type ThemeMode = 'dark' | 'light' | 'system';
 
 export interface ThemeColors {
   windowBg: string;
@@ -17,25 +17,17 @@ export interface ThemeColors {
 
 // 桌面版默认色板（来自 settings.json 的 ThemeAccentSlots / ThemeAccentRecentColors）
 export const FALLBACK_ACCENTS = [
-  '#FF6EA8',
-  '#5FD3BD',
-  '#A97FE8',
-  '#3A8BFF',
-  '#FF0606',
-  '#FF4219',
-  '#FFC7E9',
-  '#C1D9FE',
-  '#00DEAB',
-  '#006AC1',
-  '#2200E5',
-  '#43B0FF',
-  '#001E5A',
-  '#C6FF13',
-  '#FFD649',
+  '#C62828', '#D32F2F', '#E53935', '#F4511E', '#FB8C00', '#F9A825',
+  '#43A047', '#2E7D32', '#00A884', '#00897B', '#00838F', '#039BE5',
+  '#1E88E5', '#3949AB', '#5E35B1', '#8E24AA', '#D81B60', '#EC407A',
+  '#6D4C41', '#546E7A', '#FF6EA8', '#5FD3BD', '#A97FE8', '#3A8BFF',
+  '#FFC7E9', '#C1D9FE', '#00DEAB', '#006AC1', '#2200E5', '#43B0FF',
+  '#001E5A', '#C6FF13', '#FFD649',
 ];
 
 const STORAGE_ACCENT = 'shiji.accent';
 const STORAGE_MODE = 'shiji.mode';
+const STORAGE_PANEL_OPACITY = 'shiji.panel-opacity';
 
 function normalizeAccent(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -78,19 +70,19 @@ function alpha(hex: string, opacity: number): string {
 }
 
 export function buildTheme(mode: ThemeMode, accent: string): ThemeColors {
-  const isDark = mode === 'dark';
+  const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   if (isDark) {
     return {
       isDark,
-      windowBg: 'rgba(17, 21, 31, 0)',
-      panel: 'rgba(28, 33, 46, 0.82)',
-      panelAlt: 'rgba(42, 49, 66, 0.56)',
-      border: 'rgba(145, 158, 190, 0.28)',
-      textPrimary: '#F7F9FF',
-      textSecondary: '#C2C8D8',
+      windowBg: 'rgba(0, 0, 0, 0)',
+      panel: 'rgba(0, 0, 0, 0.92)',
+      panelAlt: 'rgba(0, 0, 0, 0.78)',
+      border: 'rgba(255, 255, 255, 0.2)',
+      textPrimary: '#FFFFFF',
+      textSecondary: '#C7C7C7',
       accent,
-      accentSoft: alpha(accent, 0.28),
-      categoryCard: 'rgba(58, 67, 88, 0.62)',
+      accentSoft: alpha(accent, 0.24),
+      categoryCard: 'rgba(0, 0, 0, 0.86)',
     };
   }
 
@@ -116,6 +108,8 @@ export interface ThemeController {
   mode: ThemeMode;
   setAccent: (value: string) => void;
   setMode: (value: ThemeMode) => void;
+  panelOpacity: number;
+  setPanelOpacity: (value: number) => void;
   palette: string[];
 }
 
@@ -126,7 +120,11 @@ export function useTheme(serverAccent?: string | null): ThemeController {
   });
   const [mode, setModeState] = useState<ThemeMode>(() => {
     const stored = localStorage.getItem(STORAGE_MODE);
-    return stored === 'light' || stored === 'dark' ? stored : 'light';
+    return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+  });
+  const [panelOpacity, setPanelOpacityState] = useState(() => {
+    const stored = Number(localStorage.getItem(STORAGE_PANEL_OPACITY));
+    return Number.isFinite(stored) ? Math.max(0, Math.min(1, stored)) : 0.82;
   });
 
   // 桌面版设置里的主题色作为默认值生效（用户未在网页端手动改过时才跟随）
@@ -148,7 +146,29 @@ export function useTheme(serverAccent?: string | null): ThemeController {
     localStorage.setItem(STORAGE_MODE, value);
   }, []);
 
-  const colors = useMemo(() => buildTheme(mode, accent), [mode, accent]);
+  const setPanelOpacity = useCallback((value: number) => {
+    const next = Math.max(0, Math.min(1, value));
+    setPanelOpacityState(next);
+    localStorage.setItem(STORAGE_PANEL_OPACITY, String(next));
+  }, []);
+
+  const [systemThemeVersion, setSystemThemeVersion] = useState(0);
+
+  useEffect(() => {
+    if (mode !== 'system') return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => setSystemThemeVersion((version) => version + 1);
+    media.addEventListener?.('change', onChange);
+    return () => media.removeEventListener?.('change', onChange);
+  }, [mode]);
+
+  const colors = useMemo(() => {
+    const next = buildTheme(mode, accent);
+    next.panel = next.panel.replace(/,\s*([\d.]+)\)$/, `, ${panelOpacity})`);
+    next.panelAlt = next.panelAlt.replace(/,\s*([\d.]+)\)$/, `, ${Math.max(0, panelOpacity - 0.26)})`);
+    next.categoryCard = next.categoryCard.replace(/,\s*([\d.]+)\)$/, `, ${Math.max(0, panelOpacity - 0.4)})`);
+    return next;
+  }, [mode, accent, panelOpacity, systemThemeVersion]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -176,5 +196,5 @@ export function useTheme(serverAccent?: string | null): ThemeController {
     document.body.style.color = colors.textPrimary;
   }, [colors]);
 
-  return { colors, accent, mode, setAccent, setMode, palette: FALLBACK_ACCENTS };
+  return { colors, accent, mode, setAccent, setMode, panelOpacity, setPanelOpacity, palette: FALLBACK_ACCENTS };
 }

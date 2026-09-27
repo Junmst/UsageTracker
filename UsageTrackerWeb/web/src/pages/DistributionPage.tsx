@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import TimeDistribution from '../components/TimeDistribution';
+import LoadingTransition from '../components/LoadingTransition';
+import TimeDistribution, { type DistributionMergeMode } from '../components/TimeDistribution';
 import { api } from '../lib/api';
 import type { DistributionResponse, SubjectDefinition } from '../lib/api';
 import { formatDateKey, formatHoursMinutes, getTimeDistributionDate } from '../lib/format';
@@ -63,9 +64,10 @@ interface Props {
   active: boolean;
   theme: ThemeController;
   subjects: SubjectDefinition[];
+  mergeMode: DistributionMergeMode;
 }
 
-export default function DistributionPage({ active, theme, subjects }: Props) {
+export default function DistributionPage({ active, theme, subjects, mergeMode }: Props) {
   const [days, setDays] = useState(14);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [data, setData] = useState<DistributionResponse | null>(null);
@@ -77,10 +79,13 @@ export default function DistributionPage({ active, theme, subjects }: Props) {
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuMounted, setMenuMounted] = useState(false);
+  const [rangeMenuOpen, setRangeMenuOpen] = useState(false);
   const collapseDefaultsInitializedRef = useRef(false);
   const loadingRef = useRef(false);
   const menuCloseTimerRef = useRef<number | null>(null);
+  const rangeMenuCloseTimerRef = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const rangeMenuRef = useRef<HTMLDivElement>(null);
 
   const openMenu = () => {
     if (menuCloseTimerRef.current !== null) {
@@ -107,20 +112,39 @@ export default function DistributionPage({ active, theme, subjects }: Props) {
     }, 260);
   };
 
+  const cancelRangeMenuClose = () => {
+    if (rangeMenuCloseTimerRef.current !== null) {
+      window.clearTimeout(rangeMenuCloseTimerRef.current);
+      rangeMenuCloseTimerRef.current = null;
+    }
+  };
+
+  const scheduleRangeMenuClose = () => {
+    cancelRangeMenuClose();
+    rangeMenuCloseTimerRef.current = window.setTimeout(() => {
+      setRangeMenuOpen(false);
+      rangeMenuCloseTimerRef.current = null;
+    }, 220);
+  };
+
   useEffect(() => () => {
     if (menuCloseTimerRef.current !== null) window.clearTimeout(menuCloseTimerRef.current);
+    if (rangeMenuCloseTimerRef.current !== null) window.clearTimeout(rangeMenuCloseTimerRef.current);
   }, []);
 
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen && !rangeMenuOpen) return;
     const onPointerDown = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        closeMenu();
+      const target = event.target as Node;
+      if (menuOpen && menuRef.current && !menuRef.current.contains(target)) closeMenu();
+      if (rangeMenuOpen && rangeMenuRef.current && !rangeMenuRef.current.contains(target)) {
+        cancelRangeMenuClose();
+        setRangeMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', onPointerDown);
     return () => document.removeEventListener('mousedown', onPointerDown);
-  }, [menuOpen]);
+  }, [menuOpen, rangeMenuOpen]);
 
   const groups = useMemo(() => buildSubjectFilterGroups(subjects), [subjects]);
 
@@ -195,8 +219,6 @@ export default function DistributionPage({ active, theme, subjects }: Props) {
 
   const distributionTheme = {
     panel: theme.colors.panel,
-    panelAlt: theme.colors.panelAlt,
-    windowBg: theme.colors.windowBg,
     border: theme.colors.border,
     textSecondary: theme.colors.textSecondary,
     accent: theme.colors.accent,
@@ -218,15 +240,43 @@ export default function DistributionPage({ active, theme, subjects }: Props) {
           </div>
         </div>
         <div className="header-actions">
-          {RANGES.map((item) => (
+          <div
+            className={`range-wheel${rangeMenuOpen ? ' is-open' : ''}`}
+            aria-label="时间范围选择"
+            ref={rangeMenuRef}
+            onPointerEnter={cancelRangeMenuClose}
+            onPointerLeave={() => {
+              if (rangeMenuOpen) scheduleRangeMenuClose();
+            }}
+          >
             <button
-              key={item.days}
-              className={`toolbar-button${days === item.days ? ' active' : ''}`}
-              onClick={() => setDays(item.days)}
+              className="toolbar-button range-wheel-current"
+              aria-haspopup="menu"
+              aria-expanded={rangeMenuOpen}
+              onClick={() => {
+                cancelRangeMenuClose();
+                setRangeMenuOpen((open) => !open);
+              }}
             >
-              {item.label}
+              {RANGES.find((item) => item.days === days)?.label} ▾
             </button>
-          ))}
+            <div className="range-wheel-options" role="menu">
+              {RANGES.map((item) => (
+                <button
+                  key={item.days}
+                  className={`range-wheel-option${days === item.days ? ' active' : ''}`}
+                  role="menuitemradio"
+                  aria-checked={days === item.days}
+                  onClick={() => {
+                    setDays(item.days);
+                    setRangeMenuOpen(false);
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             className={`toolbar-button${autoRefresh ? ' active' : ''}`}
             onClick={() => setAutoRefresh((v) => !v)}
@@ -274,7 +324,9 @@ export default function DistributionPage({ active, theme, subjects }: Props) {
                 </button>
                 {subjects.map((major) => {
                   const majorKey = major.name;
-                  const isMajorCollapsed = collapsedMajors.has(majorKey);
+                  const isMajorCollapsed = collapseDefaultsInitializedRef.current
+                    ? collapsedMajors.has(majorKey)
+                    : true;
                   const parents = major.parents ?? [];
                   const directChildren = major.children ?? [];
                   const hasChildren = parents.length > 0 || directChildren.length > 0;
@@ -314,7 +366,9 @@ export default function DistributionPage({ active, theme, subjects }: Props) {
                           {parents.map((parent) => {
                             const parentKey = `${major.name}/${parent.name}`;
                             const children = parent.children ?? [];
-                            const isCollapsed = collapsedParents.has(parentKey);
+                            const isCollapsed = collapseDefaultsInitializedRef.current
+                              ? collapsedParents.has(parentKey)
+                              : true;
                             return (
                               <div className="subject-filter-parent" key={parentKey}>
                                 <div className="subject-filter-parent-row">
@@ -383,7 +437,8 @@ export default function DistributionPage({ active, theme, subjects }: Props) {
         </div>
       </div>
 
-      {data ? (
+      <LoadingTransition loading={!data} className="distribution-loading-transition">
+        {data ? (
         <>
           <div className="distribution-summary">
             <div className="distribution-summary-card featured">
@@ -407,12 +462,12 @@ export default function DistributionPage({ active, theme, subjects }: Props) {
             dates={data.dates}
             sessions={visibleSessions}
             theme={distributionTheme}
+            mergeMode={mergeMode}
             height="100%"
           />
         </>
-      ) : (
-        <div className="panel loading">加载中…</div>
-      )}
+      ) : null}
+      </LoadingTransition>
     </div>
   );
 }

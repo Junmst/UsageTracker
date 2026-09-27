@@ -51,7 +51,21 @@ public sealed class WebPreferencesStore
 
     public void ClearRange()
     {
-        Save(new WebPreferencesSnapshot());
+        var snapshot = Load();
+        snapshot.OverviewRange = null;
+        Save(snapshot);
+    }
+
+    public void SaveHotkey(uint modifiers, uint key, string gesture)
+    {
+        var snapshot = Load();
+        snapshot.BrowserHotkey = new SavedBrowserHotkey
+        {
+            Modifiers = modifiers,
+            Key = key,
+            Gesture = gesture,
+        };
+        Save(snapshot);
     }
 
     private void Save(WebPreferencesSnapshot snapshot)
@@ -76,6 +90,14 @@ public sealed class WebPreferencesStore
 public sealed class WebPreferencesSnapshot
 {
     public SavedOverviewRange? OverviewRange { get; set; }
+    public SavedBrowserHotkey? BrowserHotkey { get; set; }
+}
+
+public sealed class SavedBrowserHotkey
+{
+    public uint Modifiers { get; set; }
+    public uint Key { get; set; }
+    public string Gesture { get; set; } = string.Empty;
 }
 
 public sealed class SavedOverviewRange

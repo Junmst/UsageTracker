@@ -1,21 +1,49 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import type { Meta, SubjectDefinition } from '../lib/api';
 import type { ThemeController } from '../theme';
+import type { DistributionMergeMode } from '../components/TimeDistribution';
 
 interface Props {
   theme: ThemeController;
-  palette: string[];
+  distributionMergeMode: DistributionMergeMode;
+  onDistributionMergeModeChange: (value: DistributionMergeMode) => void;
 }
 
-export default function SettingsPage({ theme, palette }: Props) {
+export default function SettingsPage({
+  theme,
+  distributionMergeMode,
+  onDistributionMergeModeChange,
+}: Props) {
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [mode, setMode] = useState<'dark' | 'light' | 'system'>(theme.mode);
+  const [hue, setHue] = useState(210);
+  const [brightness, setBrightness] = useState(0.5);
+  const [saturation, setSaturation] = useState(1);
+  const [planePoint, setPlanePoint] = useState({ x: 0.65, y: 0.45 });
+  const [isDragging, setIsDragging] = useState(false);
+  const planeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void api.meta().then(setMeta).catch(() => undefined);
   }, []);
 
-  const colors = palette.length > 0 ? palette : theme.palette;
+  const previewColor = (color: string) => {
+    theme.setAccent(color);
+  };
+  const updatePlane = (clientX: number, clientY: number) => {
+    const rect = planeRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    const nextHue = x * 360;
+    const nextBrightness = 1 - y;
+    setPlanePoint({ x, y });
+    setHue(nextHue);
+    setBrightness(nextBrightness);
+    const nextColor = hslToHex(nextHue, saturation, nextBrightness);
+    previewColor(nextColor);
+  };
 
   return (
     <div className="page">
@@ -27,39 +55,73 @@ export default function SettingsPage({ theme, palette }: Props) {
       </div>
 
       <div className="panel appearance-panel">
-        <div className="panel-title">外观</div>
-        <div className="appearance-section">
-          <div className="appearance-label">主题色</div>
-          <div className="swatch-row">
-            {colors.map((color) => (
-              <button
-                key={color}
-                className={`swatch${theme.accent.toUpperCase() === color.toUpperCase() ? ' selected' : ''}`}
-                style={{ background: color }}
-                onClick={() => theme.setAccent(color)}
-                title={color}
-              />
-            ))}
+        <div className="panel-title">个性化</div>
+        <div className="appearance-layout">
+          <div className="appearance-mode-column">
+            <div className="appearance-label">模式</div>
+            <div className="mode-row mode-column">
+              <button className={`toolbar-button${mode === 'dark' ? ' active' : ''}`} onClick={() => { setMode('dark'); theme.setMode('dark'); }}>深色</button>
+              <button className={`toolbar-button${mode === 'light' ? ' active' : ''}`} onClick={() => { setMode('light'); theme.setMode('light'); }}>浅色</button>
+              <button className={`toolbar-button${mode === 'system' ? ' active' : ''}`} onClick={() => { setMode('system'); theme.setMode('system'); }}>跟随系统</button>
+            </div>
+            <div className="appearance-label distribution-merge-label">分布图合并</div>
+            <div className="mode-row mode-column merge-mode-column">
+              {[
+                ['exact', '精确分段'],
+                ['process', '同进程合并'],
+                ['continuous', '连续区间合并'],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  className={`toolbar-button${distributionMergeMode === value ? ' active' : ''}`}
+                  onClick={() => onDistributionMergeModeChange(value as DistributionMergeMode)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-        <div className="appearance-section">
-          <div className="appearance-label">模式</div>
-          <div className="mode-row">
-            <button
-              className={`toolbar-button${theme.mode === 'dark' ? ' active' : ''}`}
-              onClick={() => theme.setMode('dark')}
-            >
-              深色
-            </button>
-            <button
-              className={`toolbar-button${theme.mode === 'light' ? ' active' : ''}`}
-              onClick={() => theme.setMode('light')}
-            >
-              浅色
-            </button>
+          <div className="appearance-theme-column">
+            <div className="appearance-section">
+          <div className="appearance-label">主题色</div>
+          <div className="theme-palette-editor">
+            <div className="theme-palette-main">
+              <div
+                ref={planeRef}
+                className="theme-color-plane"
+                onContextMenu={(event) => event.preventDefault()}
+                style={{ background: `linear-gradient(to top, #000, transparent 52%, #fff), linear-gradient(to right, hsl(0 100% 50%), hsl(60 100% 50%), hsl(120 100% 50%), hsl(180 100% 50%), hsl(240 100% 50%), hsl(300 100% 50%), hsl(360 100% 50%))` }}
+                onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setIsDragging(true); updatePlane(event.clientX, event.clientY); }}
+                onPointerMove={(event) => { if (event.buttons === 1 || isDragging) updatePlane(event.clientX, event.clientY); }}
+                onPointerUp={() => setIsDragging(false)}
+                onPointerCancel={() => setIsDragging(false)}
+              >
+                <span className="theme-color-marker" style={{ left: `${planePoint.x * 100}%`, top: `${planePoint.y * 100}%` }} />
+              </div>
+              <input aria-label="颜色深浅度" className="theme-palette-slider shade-slider" type="range" min="0" max="1" step="0.01" value={brightness} onChange={(event) => { const value = Number(event.target.value); setBrightness(value); setPlanePoint((point) => ({ ...point, y: 1 - value })); previewColor(hslToHex(hue, saturation, value)); }} />
+              <input aria-label="饱和度" className="theme-palette-slider saturation-slider" type="range" min="0" max="1" step="0.01" value={saturation} onChange={(event) => { const value = Number(event.target.value); setSaturation(value); previewColor(hslToHex(hue, value, brightness)); }} />
+              <div className="panel-opacity-control">
+                <div className="panel-opacity-heading">
+                  <span>卡片透明度</span>
+                  <strong>{Math.round(theme.panelOpacity * 100)}%</strong>
+                </div>
+                <input
+                  aria-label="卡片透明度"
+                  className="theme-palette-slider opacity-slider"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={theme.panelOpacity}
+                  onChange={(event) => theme.setPanelOpacity(Number(event.target.value))}
+                />
+              </div>
+            </div>
+            </div>
           </div>
         </div>
       </div>
+    </div>
 
       <div className="panel info-list">
         <div className="info-row">
@@ -87,11 +149,24 @@ export default function SettingsPage({ theme, palette }: Props) {
         </div>
         <div className="info-row">
           <span>主题模式</span>
-          <span className="info-value">{theme.mode === 'dark' ? '深色' : '浅色'}</span>
+          <span className="info-value">{theme.mode === 'dark' ? '深色' : theme.mode === 'light' ? '浅色' : '跟随系统'}</span>
         </div>
       </div>
     </div>
   );
+}
+
+function hslToHex(hue: number, saturation: number, lightness: number): string {
+  hue = ((hue % 360) + 360) % 360;
+  saturation = Math.max(0, Math.min(1, saturation));
+  lightness = Math.max(0, Math.min(1, lightness));
+  const a = saturation * Math.min(lightness, 1 - lightness);
+  const f = (n: number) => {
+    const k = (n + hue / 30) % 12;
+    const color = lightness - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+    return Math.round(255 * color).toString(16).padStart(2, '0');
+  };
+  return `${f(0)}${f(8)}${f(4)}`.toUpperCase();
 }
 
 export function SubjectStructure({ definitions }: { definitions: SubjectDefinition[] }) {

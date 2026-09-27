@@ -8,6 +8,7 @@ public sealed class SessionDto
     public DateTime StartTime { get; set; }
     public DateTime? EndTime { get; set; }
     public string? ManualSubject { get; set; }
+    public DateTime? LastCapturedAt { get; set; }
     public double DurationSeconds { get; set; }
     public bool IsRunning => EndTime is null;
 }

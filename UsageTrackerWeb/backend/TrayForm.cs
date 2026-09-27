@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -8,18 +9,29 @@ namespace UsageTrackerWeb;
 
 public sealed class TrayForm : Form
 {
-    private static readonly Color Accent = Color.FromArgb(85, 190, 168);
-    private static readonly Color AccentHover = Color.FromArgb(67, 169, 148);
-    private static readonly Color Background = Color.FromArgb(247, 249, 251);
-    private static readonly Color Panel = Color.White;
-    private static readonly Color Border = Color.FromArgb(226, 231, 236);
-    private static readonly Color TextPrimary = Color.FromArgb(43, 51, 62);
-    private static readonly Color TextSecondary = Color.FromArgb(112, 122, 134);
+    private static Color Accent => NativeTheme.Current.Accent;
+    private static Color AccentHover => NativeTheme.Current.AccentHover;
+    private static Color Background => NativeTheme.Current.Background;
+    private static Color Panel => NativeTheme.Current.Panel;
+    private static Color Border => NativeTheme.Current.Border;
+    private static Color TextPrimary => NativeTheme.Current.TextPrimary;
+    private static Color TextSecondary => NativeTheme.Current.TextSecondary;
     private const string RegistryRunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string StartupValueName = "时迹Web";
+    private const int BrowserHotkeyId = 0x5742;
+    private const uint ModAlt = 0x0001;
+    private const uint ModControl = 0x0002;
+    private const uint ModShift = 0x0004;
+    private const uint ModWin = 0x0008;
+    private const int WmHotkey = 0x0312;
 
     private readonly IHost _host;
     private readonly string _url;
+    private readonly WebPreferencesStore _preferences;
+    private readonly HotkeyTextBox _hotkeyBox = new();
+    private uint _hotkeyModifiers;
+    private uint _hotkeyKey;
+    private bool _hotkeyRegistered;
     private readonly NotifyIcon _notifyIcon = new();
     private readonly System.Windows.Forms.Timer _trayClickTimer = new();
     private TrayMenuForm? _trayMenu;
@@ -32,13 +44,31 @@ public sealed class TrayForm : Form
     private bool _nativeVisible;
     private DateTime _lastBrowserLaunchAt = DateTime.MinValue;
     private bool _closingForExit;
+    private bool _launcherBoundsApplied;
     private int? _ownedNativeProcessId;
 
-    public TrayForm(IHost host, string url, bool showWindow = false)
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int width, int height, uint flags);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hWnd, int attribute, ref int value, int valueSize);
+
+    public TrayForm(IHost host, string url, bool showWindow = false, WebPreferencesStore? preferences = null)
     {
         _host = host;
         _url = url;
+        _preferences = preferences ?? new WebPreferencesStore(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "UsageTrackerNative"));
         InitializeComponent();
+        NativeTheme.Changed += NativeTheme_Changed;
+        ApplyNativeTheme();
+        LoadHotkey();
+        RegisterBrowserHotkey();
         if (showWindow)
         {
             Show();
@@ -48,14 +78,18 @@ public sealed class TrayForm : Form
     private void InitializeComponent()
     {
         Text = "时迹";
-        Size = new Size(760, 860);
-        MinimumSize = new Size(760, 860);
+        var workArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1421, 888);
+        var currentWidth = Math.Min(980, Math.Max(860, workArea.Width - 40));
+        var launcherWidth = Math.Max(645, currentWidth * 3 / 4);
+        var launcherHeight = Math.Min(960, Math.Max(820, workArea.Height - 48));
+        Size = new Size(launcherWidth, launcherHeight);
+        MinimumSize = new Size(Math.Min(760, launcherWidth), Math.Min(760, launcherHeight));
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedSingle;
         ShowInTaskbar = true;
         MinimizeBox = true;
         MaximizeBox = false;
-        MaximumSize = new Size(760, 860);
+        MaximumSize = new Size(launcherWidth, launcherHeight);
         AutoScaleMode = AutoScaleMode.None;
         AutoSize = false;
         DoubleBuffered = true;
@@ -72,13 +106,14 @@ public sealed class TrayForm : Form
             Padding = new Padding(22, 20, 22, 18),
             ColumnCount = 1,
             RowCount = 5,
+            AutoScroll = true,
             BackColor = Background,
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 128));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 420));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         Controls.Add(root);
 
         var header = new TableLayoutPanel
@@ -145,6 +180,7 @@ public sealed class TrayForm : Form
             RowCount = 2,
             BackColor = Background,
             Margin = new Padding(0, 0, 0, 14),
+            Padding = new Padding(24, 18, 24, 18),
         };
         actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -176,12 +212,13 @@ public sealed class TrayForm : Form
         {
             Dock = DockStyle.Top,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             AutoSize = true,
             Padding = new Padding(14, 10, 14, 9),
             BackColor = Panel,
             Margin = new Padding(0, 0, 0, 12),
         };
+        info.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         info.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         info.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         info.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -215,6 +252,37 @@ public sealed class TrayForm : Form
         };
         urlLabel.LinkClicked += async (_, _) => await OpenBrowserAsync();
         info.Controls.Add(urlLabel, 0, 2);
+        var hotkeyLabel = new Label
+        {
+            Text = "网页快捷键",
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            MinimumSize = new Size(132, 28),
+            ForeColor = TextSecondary,
+            Font = new Font("Microsoft YaHei UI", 8.5F),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, 2, 8, 0),
+            AutoEllipsis = false,
+        };
+        _hotkeyBox.Dock = DockStyle.Left;
+        _hotkeyBox.Width = 110;
+        _hotkeyBox.Height = 28;
+        _hotkeyBox.Margin = new Padding(30, 2, 0, 0);
+        _hotkeyBox.Text = FormatHotkey(_hotkeyModifiers, _hotkeyKey);
+        _hotkeyBox.HotkeyCaptured += (_, hotkey) => SaveHotkey(hotkey.Modifiers, hotkey.Key);
+        var hotkeyRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 2,
+            RowCount = 1,
+            AutoSize = true,
+            Margin = new Padding(0, 2, 0, 0),
+        };
+        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        hotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        hotkeyRow.Controls.Add(hotkeyLabel, 0, 0);
+        hotkeyRow.Controls.Add(_hotkeyBox, 1, 0);
+        info.Controls.Add(hotkeyRow, 0, 3);
         root.Controls.Add(info, 0, 3);
 
         var footer = new TableLayoutPanel
@@ -317,17 +385,102 @@ public sealed class TrayForm : Form
     {
         _trayMenu?.CloseAnimated();
         _trayMenu = new TrayMenuForm(
-            this,
             ShowLauncher,
             () => _ = OpenBrowserAsync(),
             () => _ = SendNativeCommandAsync("show", "时迹主窗口已打开"),
             () => _ = SendNativeCommandAsync("hide", "已隐藏时迹窗口"),
             () => _ = ExitAsync());
-        _trayMenu.ShowFromTray(_notifyIcon);
+        _trayMenu.ShowFromTray();
+    }
+
+    private void NativeTheme_Changed(object? sender, EventArgs e)
+    {
+        if (IsDisposed) return;
+        if (InvokeRequired)
+        {
+            BeginInvoke(ApplyNativeTheme);
+            return;
+        }
+        ApplyNativeTheme();
+    }
+
+    private void ApplyNativeTheme()
+    {
+        var palette = NativeTheme.Current;
+        BackColor = palette.Background;
+        ApplyNativeTheme(this, palette);
+        ApplyDarkTitleBar(palette.IsDark);
+        Invalidate(true);
+    }
+
+    private static void ApplyNativeTheme(Control control, NativeThemePalette palette)
+    {
+        if (control is Button button)
+        {
+            var primary = Equals(button.Tag, "primary");
+            button.BackColor = primary ? palette.Accent : palette.Panel;
+            button.ForeColor = primary ? (palette.IsDark ? Color.Black : Color.White) : palette.TextPrimary;
+            button.FlatAppearance.BorderColor = palette.Border;
+            button.FlatAppearance.MouseOverBackColor = primary ? palette.AccentHover : Color.FromArgb(
+                Math.Min(255, palette.Panel.R + 10),
+                Math.Min(255, palette.Panel.G + 10),
+                Math.Min(255, palette.Panel.B + 10));
+            button.FlatAppearance.MouseDownBackColor = primary ? palette.AccentHover : palette.AccentSoft;
+        }
+        else if (control is LinkLabel link)
+        {
+            link.LinkColor = palette.AccentHover;
+            link.ActiveLinkColor = palette.AccentHover;
+            link.VisitedLinkColor = palette.AccentHover;
+            link.ForeColor = palette.AccentHover;
+        }
+        else if (control is HotkeyTextBox hotkeyBox)
+        {
+            hotkeyBox.BackColor = palette.Panel;
+            hotkeyBox.ForeColor = palette.TextPrimary;
+        }
+        else if (control is Label label)
+        {
+            label.ForeColor = label.Text is "时迹" or "桌面记录" ? palette.TextPrimary : palette.TextSecondary;
+            var parentIsPanel = label.Parent is Panel || label.Parent is TableLayoutPanel;
+            label.BackColor = parentIsPanel ? palette.Panel : palette.Background;
+        }
+        else if (control is ToggleSwitch toggle)
+        {
+            toggle.BackColor = palette.Background;
+            toggle.Invalidate();
+        }
+        else if (control is StatusDot statusDot)
+        {
+            statusDot.Color = palette.Accent;
+            statusDot.Invalidate();
+        }
+
+        if (control is Form or TableLayoutPanel or FlowLayoutPanel)
+        {
+            control.BackColor = palette.Background;
+        }
+        else if (control is Panel panel)
+        {
+            panel.BackColor = palette.Panel;
+        }
+
+        foreach (Control child in control.Controls)
+        {
+            ApplyNativeTheme(child, palette);
+        }
+    }
+
+    private void ApplyDarkTitleBar(bool dark)
+    {
+        if (!OperatingSystem.IsWindows() || !IsHandleCreated) return;
+        var value = dark ? 1 : 0;
+        _ = DwmSetWindowAttribute(Handle, 20, ref value, sizeof(int));
     }
 
     private static void StyleButton(Button button, bool primary)
     {
+        button.Tag = primary ? "primary" : "secondary";
         button.Dock = DockStyle.Fill;
         button.FlatStyle = FlatStyle.Flat;
         button.FlatAppearance.BorderSize = primary ? 0 : 1;
@@ -467,6 +620,19 @@ public sealed class TrayForm : Form
         _nativeButton.Text = _nativeVisible ? "隐藏时迹" : "打开时迹";
     }
 
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        ApplyNativeTheme();
+        if (_launcherBoundsApplied) return;
+        _launcherBoundsApplied = true;
+        var workArea = Screen.FromControl(this).WorkingArea;
+        var currentWidth = Math.Min(980, Math.Max(860, workArea.Width - 40));
+        var width = Math.Max(645, currentWidth * 3 / 4);
+        var height = Math.Min(960, Math.Max(820, workArea.Height - 48));
+        SetWindowPos(Handle, IntPtr.Zero, 0, 0, width, height, SwpNoMove | SwpNoZOrder | SwpNoActivate);
+    }
+
     private void ShowLauncher()
     {
         if (Visible && WindowState != FormWindowState.Minimized)
@@ -479,6 +645,82 @@ public sealed class TrayForm : Form
         WindowState = FormWindowState.Normal;
         Activate();
     }
+
+    private void LoadHotkey()
+    {
+        var hotkey = _preferences.Load().BrowserHotkey;
+        if (hotkey is null || hotkey.Modifiers == 0 || hotkey.Key == 0)
+        {
+            _hotkeyModifiers = ModControl | ModAlt;
+            _hotkeyKey = (uint)Keys.W;
+        }
+        else
+        {
+            _hotkeyModifiers = hotkey.Modifiers;
+            _hotkeyKey = hotkey.Key;
+        }
+
+        _hotkeyBox.Text = FormatHotkey(_hotkeyModifiers, _hotkeyKey);
+    }
+
+    private void SaveHotkey(uint modifiers, uint key)
+    {
+        if ((modifiers & (ModControl | ModAlt | ModShift | ModWin)) == 0) return;
+        UnregisterBrowserHotkey();
+        _hotkeyModifiers = modifiers;
+        _hotkeyKey = key;
+        _preferences.SaveHotkey(modifiers, key, FormatHotkey(modifiers, key));
+        RegisterBrowserHotkey();
+        _hotkeyBox.Text = FormatHotkey(modifiers, key);
+    }
+
+    private void RegisterBrowserHotkey()
+    {
+        _hotkeyRegistered = RegisterHotKey(Handle, BrowserHotkeyId, _hotkeyModifiers, _hotkeyKey);
+        if (!_hotkeyRegistered)
+        {
+            _hotkeyBox.Text = $"{FormatHotkey(_hotkeyModifiers, _hotkeyKey)}（不可用）";
+        }
+    }
+
+    private void UnregisterBrowserHotkey()
+    {
+        if (!_hotkeyRegistered) return;
+        UnregisterHotKey(Handle, BrowserHotkeyId);
+        _hotkeyRegistered = false;
+    }
+
+    private static string FormatHotkey(uint modifiers, uint key)
+    {
+        var parts = new List<string>();
+        if ((modifiers & ModControl) != 0) parts.Add("Ctrl");
+        if ((modifiers & ModAlt) != 0) parts.Add("Alt");
+        if ((modifiers & ModShift) != 0) parts.Add("Shift");
+        if ((modifiers & ModWin) != 0) parts.Add("Win");
+        parts.Add(((Keys)key).ToString());
+        return string.Join(" + ", parts);
+    }
+
+    protected override void WndProc(ref Message message)
+    {
+        if (message.Msg == WmHotkey && message.WParam.ToInt32() == BrowserHotkeyId)
+        {
+            _ = OpenBrowserAsync();
+        }
+        base.WndProc(ref message);
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        UnregisterBrowserHotkey();
+        base.OnHandleDestroyed(e);
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
     private async Task OpenBrowserAsync()
     {
@@ -604,6 +846,7 @@ public sealed class TrayForm : Form
             _timer.Dispose();
             _trayClickTimer.Stop();
             _trayClickTimer.Dispose();
+            NativeTheme.Changed -= NativeTheme_Changed;
             _trayMenu?.CloseAnimated();
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
@@ -612,6 +855,42 @@ public sealed class TrayForm : Form
     }
 
     private sealed record BrowserPresenceResponse(bool Alive);
+
+    private sealed class HotkeyTextBox : TextBox
+    {
+        public event EventHandler<HotkeyGesture>? HotkeyCaptured;
+
+        public HotkeyTextBox()
+        {
+            ReadOnly = true;
+            TabStop = true;
+            BackColor = Panel;
+            ForeColor = TextPrimary;
+            BorderStyle = BorderStyle.FixedSingle;
+            Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+            TextAlign = HorizontalAlignment.Center;
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+            if (e.KeyCode is Keys.ControlKey or Keys.Menu or Keys.ShiftKey or Keys.LWin or Keys.RWin)
+            {
+                return;
+            }
+
+            var modifiers = 0u;
+            if (e.Control) modifiers |= ModControl;
+            if (e.Alt) modifiers |= ModAlt;
+            if (e.Shift) modifiers |= ModShift;
+            if (modifiers == 0) return;
+            HotkeyCaptured?.Invoke(this, new HotkeyGesture(modifiers, (uint)e.KeyCode));
+        }
+    }
+
+    private sealed record HotkeyGesture(uint Modifiers, uint Key);
 
     private sealed class IconMark : Control
     {
@@ -626,15 +905,16 @@ public sealed class TrayForm : Form
             base.OnPaint(e);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             var circle = new Rectangle(4, 4, Width - 9, Height - 9);
-            using var brush = new SolidBrush(Color.FromArgb(225, 244, 240));
-            using var border = new Pen(Color.FromArgb(187, 226, 218), 1);
+            var palette = NativeTheme.Current;
+            using var brush = new SolidBrush(palette.AccentSoft);
+            using var border = new Pen(palette.Border, 1);
             e.Graphics.FillEllipse(brush, circle);
             e.Graphics.DrawEllipse(border, circle);
-            using var hand = new Pen(AccentHover, 2.2F) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            using var hand = new Pen(palette.AccentHover, 2.2F) { StartCap = LineCap.Round, EndCap = LineCap.Round };
             var center = new PointF(Width / 2F, Height / 2F);
             e.Graphics.DrawLine(hand, center, new PointF(center.X, center.Y - 10));
             e.Graphics.DrawLine(hand, center, new PointF(center.X + 8, center.Y + 5));
-            using var dot = new SolidBrush(AccentHover);
+            using var dot = new SolidBrush(NativeTheme.Current.AccentHover);
             e.Graphics.FillEllipse(dot, center.X - 2, center.Y - 2, 4, 4);
         }
     }
@@ -673,7 +953,8 @@ public sealed class TrayForm : Form
             e.Graphics.Clear(Parent?.BackColor ?? Background);
             var track = new Rectangle((Width - TrackWidth) / 2, (Height - TrackHeight) / 2, TrackWidth, TrackHeight);
             using var path = GetRoundedRect(track, TrackHeight / 2);
-            using var trackBrush = new SolidBrush(Checked ? Accent : Color.FromArgb(209, 216, 222));
+            var palette = NativeTheme.Current;
+            using var trackBrush = new SolidBrush(Checked ? palette.Accent : palette.Border);
             e.Graphics.FillPath(trackBrush, path);
             var x = Checked ? track.Right - ThumbSize - 2 : track.Left + 2;
             var thumb = new Rectangle(x, track.Top + 2, ThumbSize, ThumbSize);

@@ -7,7 +7,7 @@
         Height="820"
         MinWidth="920"
         MinHeight="640"
-        Icon="pack://application:,,,/Assets/app-icon.ico"
+        Icon="pack://application:,,,/Assets/app-icon.png"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}">
     <Window.Resources>

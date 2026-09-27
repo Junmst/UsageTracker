@@ -5,13 +5,12 @@ namespace UsageTrackerWeb;
 
 internal sealed class TrayMenuForm : Form
 {
-    private static readonly Color MenuBackground = Color.White;
-    private static readonly Color MenuBorder = Color.FromArgb(216, 230, 226);
-    private static readonly Color TextPrimary = Color.FromArgb(43, 51, 62);
-    private static readonly Color Accent = Color.FromArgb(85, 190, 168);
-    private static readonly Color AccentSoft = Color.FromArgb(231, 247, 243);
-    private static readonly Color Danger = Color.FromArgb(202, 76, 91);
-    private static readonly Color DangerSoft = Color.FromArgb(255, 242, 245);
+    private static Color MenuBackground => NativeTheme.Current.Panel;
+    private static Color MenuBorder => NativeTheme.Current.Border;
+    private static Color TextPrimary => NativeTheme.Current.TextPrimary;
+    private static Color AccentSoft => NativeTheme.Current.AccentSoft;
+    private static Color Danger => NativeTheme.Current.Danger;
+    private static Color DangerSoft => NativeTheme.Current.DangerSoft;
     private static readonly Font TitleFont = new("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
     private static readonly Font ActionFont = new("Microsoft YaHei UI", 10F, FontStyle.Bold);
     private static readonly Font IconFont = new("Segoe UI Symbol", 10.5F, FontStyle.Bold);
@@ -31,14 +30,12 @@ internal sealed class TrayMenuForm : Form
     private Action? _pendingAction;
 
     public TrayMenuForm(
-        Form owner,
         Action openLauncher,
         Action openBrowser,
         Action showNative,
         Action hideNative,
         Action exitAll)
     {
-        _ = owner;
         _actions = [openLauncher, openBrowser, showNative, hideNative, exitAll];
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -55,13 +52,35 @@ internal sealed class TrayMenuForm : Form
         _closeTimer.Tick += CloseTimer_Tick;
         _animationTimer.Interval = 16;
         _animationTimer.Tick += AnimationTimer_Tick;
+        NativeTheme.Changed += NativeTheme_Changed;
         MouseEnter += (_, _) => _closeTimer.Stop();
         MouseLeave += (_, _) => StartCloseTimer();
     }
 
-    public void ShowFromTray(NotifyIcon notifyIcon)
+    private void NativeTheme_Changed(object? sender, EventArgs e)
     {
-        _ = notifyIcon;
+        if (IsDisposed || !IsHandleCreated) return;
+        try
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    BackColor = MenuBackground;
+                    Invalidate();
+                }));
+                return;
+            }
+            BackColor = MenuBackground;
+            Invalidate();
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    public void ShowFromTray()
+    {
         var cursor = Cursor.Position;
         var area = Screen.FromPoint(cursor).WorkingArea;
         _trayHotspot = cursor;
@@ -122,7 +141,8 @@ internal sealed class TrayMenuForm : Form
             using var backgroundBrush = new SolidBrush(background);
             graphics.FillPath(backgroundBrush, path);
 
-            using var iconBrush = new SolidBrush(isDanger ? Danger : Accent);
+            var palette = NativeTheme.Current;
+            using var iconBrush = new SolidBrush(isDanger ? Danger : palette.IsDark ? Color.White : Color.Black);
             using var textBrush = new SolidBrush(isDanger ? Danger : TextPrimary);
             using var iconFormat = new StringFormat
             {
@@ -284,6 +304,7 @@ internal sealed class TrayMenuForm : Form
         {
             _closeTimer.Stop();
             _closeTimer.Dispose();
+            NativeTheme.Changed -= NativeTheme_Changed;
         }
         base.Dispose(disposing);
     }

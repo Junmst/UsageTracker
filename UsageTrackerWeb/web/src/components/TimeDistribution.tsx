@@ -14,7 +14,11 @@ const HEADER_HEIGHT = 36;
 const DATE_COLUMN_WIDTH = 142;
 const ROW_HEIGHT = 58;
 const BOTTOM_PADDING = 10;
-const TOTAL_MINUTES = 1440;
+const DAY_MINUTES = 1440;
+const EDGE_MARGIN_MINUTES = 20;
+const TIMELINE_START_MINUTES = -EDGE_MARGIN_MINUTES;
+const TIMELINE_END_MINUTES = DAY_MINUTES + EDGE_MARGIN_MINUTES;
+const TIMELINE_MINUTES = TIMELINE_END_MINUTES - TIMELINE_START_MINUTES;
 const MIN_ZOOM = 0.96;
 const DEFAULT_ZOOM = 1.27;
 const DEFAULT_START_MINUTES = 150;
@@ -23,8 +27,6 @@ const MAX_CACHE_PIXELS = 40_000_000;
 
 export interface DistributionTheme {
   panel: string;
-  panelAlt: string;
-  windowBg: string;
   border: string;
   textSecondary: string;
   accent: string;
@@ -52,17 +54,28 @@ interface ViewState {
   offsetY: number;
 }
 
+export type DistributionMergeMode = 'exact' | 'process' | 'continuous';
+
 function getTimeScaleStep(zoom: number): number {
   if (zoom >= 10) return 10;
   if (zoom >= 6) return 15;
   if (zoom >= 4) return 30;
   if (zoom >= 3) return 60;
+  if (zoom >= 2.5) return 60;
   if (zoom >= 1.2) return 120;
   return 240;
 }
 
 function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
+}
+
+function minuteToWorldX(minutes: number, baseWidth: number): number {
+  return ((minutes - TIMELINE_START_MINUTES) / TIMELINE_MINUTES) * baseWidth;
+}
+
+function worldXToMinutes(worldX: number, baseWidth: number): number {
+  return TIMELINE_START_MINUTES + (worldX / baseWidth) * TIMELINE_MINUTES;
 }
 
 function roundRect(
@@ -121,7 +134,7 @@ interface Props {
   sessions: SessionDto[];
   height?: number | string;
   theme: DistributionTheme;
-  onNeedOlder?: () => void;
+  mergeMode?: DistributionMergeMode;
 }
 
 export default function TimeDistribution({
@@ -130,14 +143,15 @@ export default function TimeDistribution({
   sessions,
   height = 560,
   theme,
-  onNeedOlder,
+  mergeMode = 'process',
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef<ViewState>({ zoom: DEFAULT_ZOOM, offsetX: 0, offsetY: 0 });
   const defaultViewInitializedRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const draggingRef = useRef(false);
-  const pointerRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
+  const pointerRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0, lastX: 0, lastY: 0, lastTime: 0 });
+  const inertiaRef = useRef({ x: 0, y: 0, frame: null as number | null });
   const wheelRef = useRef({ deltaX: 0, deltaY: 0, zoomDelta: 0, mouseX: 0, frame: null as number | null });
   const zoomingRef = useRef(false);
   const hoverRef = useRef<{ row: number; segment: Segment } | null>(null);
@@ -208,10 +222,16 @@ export default function TimeDistribution({
       }
     }
     return rows.map((segments) => {
+      if (mergeMode === 'exact') {
+        return segments.sort((a, b) => a.startMin - b.startMin);
+      }
       const merged: Segment[] = [];
       for (const segment of segments.sort((a, b) => a.startMin - b.startMin)) {
         const previous = merged[merged.length - 1];
-        if (previous && segment.startMin <= previous.endMin + 0.35) {
+        const sameProcess = previous?.session.processName === segment.session.processName;
+        const closeEnough = segment.startMin <= (previous?.endMin ?? -Infinity) + 0.35;
+        const canMerge = previous && closeEnough && (mergeMode === 'continuous' || sameProcess);
+        if (canMerge) {
           previous.endMin = Math.max(previous.endMin, segment.endMin);
           continue;
         }
@@ -219,7 +239,7 @@ export default function TimeDistribution({
       }
       return merged;
     });
-  }, [orderedDates, prepared]);
+  }, [mergeMode, orderedDates, prepared]);
 
   const rowTotals = useMemo(() => {
     return rowSegments.map((segments) =>
@@ -246,7 +266,7 @@ export default function TimeDistribution({
     (view: ViewState): ViewState => {
       const metrics = getMetrics();
       if (!metrics) return view;
-      const maxOffsetX = Math.max(0, metrics.viewportWidth * view.zoom - metrics.viewportWidth);
+      const maxOffsetX = Math.max(0, metrics.baseWidth - metrics.viewportWidth / view.zoom);
       const maxOffsetY = Math.max(0, metrics.worldHeight - metrics.viewportHeight);
       return {
         zoom: clamp(view.zoom, MIN_ZOOM, MAX_ZOOM),
@@ -260,8 +280,8 @@ export default function TimeDistribution({
   const getDefaultView = useCallback((): ViewState => {
     const metrics = getMetrics();
     if (!metrics) return { zoom: DEFAULT_ZOOM, offsetX: 0, offsetY: 0 };
-    const maxOffsetX = Math.max(0, metrics.viewportWidth * DEFAULT_ZOOM - metrics.viewportWidth);
-    const startOffsetX = (DEFAULT_START_MINUTES / TOTAL_MINUTES) * metrics.baseWidth;
+    const maxOffsetX = Math.max(0, metrics.baseWidth - metrics.viewportWidth / DEFAULT_ZOOM);
+    const startOffsetX = minuteToWorldX(DEFAULT_START_MINUTES, metrics.baseWidth);
     return {
       zoom: DEFAULT_ZOOM,
       offsetX: clamp(startOffsetX, 0, maxOffsetX),
@@ -292,7 +312,6 @@ export default function TimeDistribution({
     ctx.clearRect(0, 0, worldWidth, worldHeight);
 
     const minuteStep = getTimeScaleStep(view.zoom);
-    const scaledStep = (minuteStep / TOTAL_MINUTES) * metrics.baseWidth * view.zoom;
 
     // 交替行底色先绘制，网格线和会话条保持清晰可见。
     ctx.globalAlpha = 1;
@@ -309,10 +328,18 @@ export default function TimeDistribution({
     ctx.lineWidth = 1;
     ctx.globalAlpha = 0.62;
     ctx.beginPath();
-    for (let x = 0; x <= worldWidth + 1; x += scaledStep) {
+    for (let minutesOffset = 0; minutesOffset <= DAY_MINUTES; minutesOffset += minuteStep) {
+      const x = minuteToWorldX(minutesOffset, metrics.baseWidth) * view.zoom;
       ctx.moveTo(x, 0);
       ctx.lineTo(x, worldHeight);
     }
+    ctx.stroke();
+    ctx.strokeStyle = theme.accentSoft;
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    const x = minuteToWorldX(TIMELINE_START_MINUTES, metrics.baseWidth) * view.zoom;
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, worldHeight);
     ctx.stroke();
 
     // 水平网格线，帮助快速横向追踪日期。
@@ -329,7 +356,7 @@ export default function TimeDistribution({
 
     // 会话条
     const barHeight = Math.max(8, Math.min(ROW_HEIGHT - 10, 34));
-    const scale = (minutes: number) => (minutes / TOTAL_MINUTES) * metrics.baseWidth * view.zoom;
+    const scale = (minutes: number) => minuteToWorldX(minutes, metrics.baseWidth) * view.zoom;
     for (let row = 0; row < rowSegments.length; row++) {
       const y = row * ROW_HEIGHT;
       const barTop = y + (ROW_HEIGHT - barHeight) / 2;
@@ -431,10 +458,20 @@ export default function TimeDistribution({
       ctx.strokeStyle = theme.border;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      for (let minutesOffset = 0; minutesOffset <= TOTAL_MINUTES; minutesOffset += minuteStep) {
-        const worldX = (minutesOffset / TOTAL_MINUTES) * baseWidth;
+      for (let minutesOffset = 0; minutesOffset <= DAY_MINUTES; minutesOffset += minuteStep) {
+        const worldX = minuteToWorldX(minutesOffset, baseWidth);
         const screenX = (worldX - view.offsetX) * view.zoom;
         if (screenX < -1 || screenX > viewportWidth + 1) continue;
+        ctx.moveTo(screenX, 0);
+        ctx.lineTo(screenX, viewportHeight);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = theme.accentSoft;
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      const worldX = minuteToWorldX(TIMELINE_START_MINUTES, baseWidth);
+      const screenX = (worldX - view.offsetX) * view.zoom;
+      if (screenX >= -1 && screenX <= viewportWidth + 1) {
         ctx.moveTo(screenX, 0);
         ctx.lineTo(screenX, viewportHeight);
       }
@@ -463,9 +500,9 @@ export default function TimeDistribution({
         const screenY = row * ROW_HEIGHT - view.offsetY;
         const barTop = screenY + (ROW_HEIGHT - barHeight) / 2;
         for (const segment of rowSegments[row] ?? []) {
-          const worldX = (segment.startMin / TOTAL_MINUTES) * baseWidth;
+          const worldX = minuteToWorldX(segment.startMin, baseWidth);
           const screenX = (worldX - view.offsetX) * view.zoom;
-          const screenWidth = ((segment.endMin - segment.startMin) / TOTAL_MINUTES) * baseWidth * view.zoom;
+          const screenWidth = (minuteToWorldX(segment.endMin, baseWidth) - worldX) * view.zoom;
           if (screenX + screenWidth < 0 || screenX > viewportWidth) continue;
           fillGradientBar(ctx, screenX + 0.5, barTop, Math.max(2, screenWidth - 1), barHeight, theme.accent, theme.accentSoft);
         }
@@ -478,9 +515,9 @@ export default function TimeDistribution({
       const screenY = hover.row * ROW_HEIGHT - view.offsetY;
       const barHeight = Math.max(8, Math.min(ROW_HEIGHT - 10, 34));
       const barTop = screenY + (ROW_HEIGHT - barHeight) / 2;
-      const worldX = (hover.segment.startMin / TOTAL_MINUTES) * baseWidth;
+      const worldX = minuteToWorldX(hover.segment.startMin, baseWidth);
       const screenX = (worldX - view.offsetX) * view.zoom;
-      const screenWidth = ((hover.segment.endMin - hover.segment.startMin) / TOTAL_MINUTES) * baseWidth * view.zoom;
+      const screenWidth = (minuteToWorldX(hover.segment.endMin, baseWidth) - worldX) * view.zoom;
       fillGradientBar(ctx, screenX + 0.5, barTop, Math.max(2, screenWidth - 1), barHeight, theme.accent, theme.accentSoft);
       ctx.strokeStyle = theme.textPrimary;
       ctx.lineWidth = 1;
@@ -498,21 +535,32 @@ export default function TimeDistribution({
     ctx.strokeStyle = theme.border;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    for (let minutesOffset = 0; minutesOffset <= TOTAL_MINUTES; minutesOffset += minuteStep) {
-      const worldX = (minutesOffset / TOTAL_MINUTES) * baseWidth;
+    for (let minutesOffset = 0; minutesOffset <= DAY_MINUTES; minutesOffset += minuteStep) {
+      const worldX = minuteToWorldX(minutesOffset, baseWidth);
       const screenX = (worldX - view.offsetX) * view.zoom;
       if (screenX < -1 || screenX > viewportWidth + 1) continue;
       ctx.moveTo(screenX, HEADER_HEIGHT - 6);
       ctx.lineTo(screenX, HEADER_HEIGHT);
     }
     ctx.stroke();
+    ctx.strokeStyle = theme.accentSoft;
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    const boundaryWorldX = minuteToWorldX(TIMELINE_START_MINUTES, baseWidth);
+    const boundaryScreenX = (boundaryWorldX - view.offsetX) * view.zoom;
+    if (boundaryScreenX >= -1 && boundaryScreenX <= viewportWidth + 1) {
+      ctx.moveTo(boundaryScreenX, 0);
+      ctx.lineTo(boundaryScreenX, HEADER_HEIGHT);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
     ctx.fillStyle = theme.textSecondary;
     ctx.font = '11px "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     const rangeStart = getDayStart(new Date()).getTime();
-    for (let minutesOffset = 0; minutesOffset <= TOTAL_MINUTES; minutesOffset += minuteStep) {
-      const worldX = (minutesOffset / TOTAL_MINUTES) * baseWidth;
+    for (let minutesOffset = 0; minutesOffset <= DAY_MINUTES; minutesOffset += minuteStep) {
+      const worldX = minuteToWorldX(minutesOffset, baseWidth);
       const screenX = (worldX - view.offsetX) * view.zoom;
       if (screenX < -80 || screenX > viewportWidth + 80) continue;
       const time = new Date(rangeStart + minutesOffset * 60000);
@@ -558,13 +606,8 @@ export default function TimeDistribution({
     ctx.globalAlpha = 1;
     ctx.restore();
 
-    // 滚到底部时通知外层加载更早日期
-    if (onNeedOlder && view.offsetY >= Math.max(0, metrics.worldHeight - viewportHeight) - ROW_HEIGHT) {
-      onNeedOlder();
-    }
   }, [
     getMetrics,
-    onNeedOlder,
     orderedDates,
     rowSegments,
     rowTotals,
@@ -572,10 +615,8 @@ export default function TimeDistribution({
     theme.accentSoft,
     theme.border,
     theme.panel,
-    theme.panelAlt,
     theme.textPrimary,
     theme.textSecondary,
-    theme.windowBg,
   ]);
 
   const renderRef = useRef(render);
@@ -637,6 +678,12 @@ export default function TimeDistribution({
       wheelRef.current.zoomDelta = 0;
       zoomingRef.current = false;
     }
+    if (inertiaRef.current.frame !== null) {
+      cancelAnimationFrame(inertiaRef.current.frame);
+      inertiaRef.current.frame = null;
+    }
+    inertiaRef.current.x = 0;
+    inertiaRef.current.y = 0;
   }, [active]);
 
   useEffect(
@@ -657,7 +704,7 @@ export default function TimeDistribution({
       const row = Math.floor((mouseY - HEADER_HEIGHT + view.offsetY) / ROW_HEIGHT);
       if (row < 0 || row >= rowSegments.length) return null;
       const worldX = view.offsetX + (mouseX - DATE_COLUMN_WIDTH) / view.zoom;
-      const targetMinutes = (worldX / metrics.baseWidth) * TOTAL_MINUTES;
+      const targetMinutes = worldXToMinutes(worldX, metrics.baseWidth);
       for (const segment of rowSegments[row]) {
         if (targetMinutes >= segment.startMin && targetMinutes <= segment.endMin) {
           return { row, segment };
@@ -668,18 +715,33 @@ export default function TimeDistribution({
     [getMetrics, rowSegments]
   );
 
+  const stopInertia = () => {
+    if (inertiaRef.current.frame !== null) {
+      cancelAnimationFrame(inertiaRef.current.frame);
+      inertiaRef.current.frame = null;
+    }
+    inertiaRef.current.x = 0;
+    inertiaRef.current.y = 0;
+  };
+
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    stopInertia();
     canvas.setPointerCapture(event.pointerId);
     const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
     draggingRef.current = true;
     setDragging(true);
     pointerRef.current = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
+      x,
+      y,
       offsetX: viewRef.current.offsetX,
       offsetY: viewRef.current.offsetY,
+      lastX: x,
+      lastY: y,
+      lastTime: performance.now(),
     };
   };
 
@@ -693,6 +755,14 @@ export default function TimeDistribution({
     if (draggingRef.current) {
       const dx = mouseX - pointerRef.current.x;
       const dy = mouseY - pointerRef.current.y;
+      const now = performance.now();
+      const elapsed = Math.max(8, now - pointerRef.current.lastTime);
+      const velocityScale = Math.min(2.2, 16 / elapsed);
+      inertiaRef.current.x = (-((mouseX - pointerRef.current.lastX) / viewRef.current.zoom) * velocityScale);
+      inertiaRef.current.y = (-(mouseY - pointerRef.current.lastY) * velocityScale);
+      pointerRef.current.lastX = mouseX;
+      pointerRef.current.lastY = mouseY;
+      pointerRef.current.lastTime = now;
       viewRef.current = clampView({
         zoom: viewRef.current.zoom,
         offsetX: pointerRef.current.offsetX - dx / viewRef.current.zoom,
@@ -746,6 +816,26 @@ export default function TimeDistribution({
     draggingRef.current = false;
     setDragging(false);
     canvasRef.current?.releasePointerCapture(event.pointerId);
+
+    if (Math.abs(inertiaRef.current.x) < 0.02 && Math.abs(inertiaRef.current.y) < 0.02) return;
+    const animateInertia = () => {
+      const inertia = inertiaRef.current;
+      const friction = 0.9;
+      inertia.x *= friction;
+      inertia.y *= friction;
+      if (Math.abs(inertia.x) < 0.02 && Math.abs(inertia.y) < 0.02) {
+        stopInertia();
+        return;
+      }
+      viewRef.current = clampView({
+        zoom: viewRef.current.zoom,
+        offsetX: viewRef.current.offsetX + inertia.x,
+        offsetY: viewRef.current.offsetY + inertia.y,
+      });
+      scheduleRender();
+      inertia.frame = requestAnimationFrame(animateInertia);
+    };
+    inertiaRef.current.frame = requestAnimationFrame(animateInertia);
   };
 
   const handleWheel = useCallback(
@@ -761,9 +851,11 @@ export default function TimeDistribution({
       if (event.ctrlKey || event.metaKey) {
         zoomingRef.current = true;
         wheel.zoomDelta += event.deltaY * wheelScale;
-      } else if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
-        wheel.deltaX += (event.shiftKey ? 0 : event.deltaX) * wheelScale;
-        wheel.deltaY += (event.shiftKey ? event.deltaY : 0) * wheelScale;
+      } else if (event.shiftKey) {
+        // 浏览器通常把 Shift+滚轮转换为 deltaY，显式映射到横向偏移。
+        wheel.deltaX += (event.deltaX || event.deltaY) * wheelScale;
+      } else if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+        wheel.deltaX += event.deltaX * wheelScale;
       } else {
         wheel.deltaY += event.deltaY * wheelScale;
       }
@@ -874,7 +966,7 @@ export default function TimeDistribution({
           重置
         </button>
         <span className="toolbar-hint">
-          {zoomLabel.toFixed(2)}× · 滚轮缩放 · 拖拽平移 · Shift+滚轮纵向
+          {zoomLabel.toFixed(2)}× · 滚轮上下移动 · Ctrl+滚轮缩放 · Shift+滚轮水平移动
         </span>
       </div>
       <div className="distribution-viewport" style={{ height }}>

@@ -47,6 +47,43 @@ static DateTime ParseDate(string? value)
         ? parsed
         : UsageTimeRange.GetTimeDistributionDate(DateTime.Now);
 
+static bool MatchesSubjectFilter(string? subject, string? filter, List<SubjectDefinitionDto> definitions)
+{
+    if (string.IsNullOrWhiteSpace(filter)) return true;
+    if (string.IsNullOrWhiteSpace(subject)) return false;
+    var selected = filter.Trim();
+    if (string.Equals(subject, selected, StringComparison.OrdinalIgnoreCase)) return true;
+
+    foreach (var major in definitions)
+    {
+        var descendants = (major.Children ?? []).Concat(
+            (major.Parents ?? []).SelectMany(parent => new[] { parent.Name }.Concat(parent.Children ?? [])));
+        if (string.Equals(major.Name, selected, StringComparison.OrdinalIgnoreCase)
+            && descendants.Any(item => string.Equals(item, subject, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        foreach (var parent in major.Parents ?? [])
+        {
+            if (string.Equals(parent.Name, selected, StringComparison.OrdinalIgnoreCase)
+                && (parent.Children ?? []).Any(child => string.Equals(child, subject, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static Func<SessionDto, bool>? CreateSubjectFilter(string? subject, SettingsReader settingsReader)
+{
+    if (string.IsNullOrWhiteSpace(subject)) return null;
+    var definitions = settingsReader.Load().SubjectDefinitions ?? new List<SubjectDefinitionDto>();
+    return session => MatchesSubjectFilter(session.ManualSubject, subject, definitions);
+}
+
 static bool IsLocalWebRequest(HttpRequest request, int expectedPort)
 {
     var host = request.Host.Host;
@@ -84,32 +121,36 @@ app.MapGet("/api/meta", () => Json(new
     earliestDate = store.GetEarliestDate()?.ToString("yyyy-MM-dd")
 }));
 
-app.MapGet("/api/overview", (string? date) =>
+app.MapGet("/api/overview", (string? date, string? subject) =>
 {
     var target = ParseDate(date);
-    var payload = GetCached($"overview:{target:yyyy-MM-dd}", TimeSpan.FromSeconds(20), () =>
+    var filter = CreateSubjectFilter(subject, settingsReader);
+    var payload = GetCached($"overview:{target:yyyy-MM-dd}:{subject ?? string.Empty}", TimeSpan.FromSeconds(20), () =>
     {
         var dayStart = UsageTimeRange.GetDayStart(target);
         var dayEnd = UsageTimeRange.GetDayEnd(target);
-
-        var today = store.GetSecondsInRange(dayStart, dayEnd);
-
+        var today = store.GetSecondsInRange(dayStart, dayEnd, filter);
         var weekStart = StartOfWeek(target);
-        var week = store.GetSecondsInRange(UsageTimeRange.GetDayStart(weekStart), dayEnd);
-
+        var week = store.GetSecondsInRange(UsageTimeRange.GetDayStart(weekStart), dayEnd, filter);
         var monthStart = new DateTime(target.Year, target.Month, 1);
-        var month = store.GetSecondsInRange(UsageTimeRange.GetDayStart(monthStart), dayEnd);
-
+        var month = store.GetSecondsInRange(UsageTimeRange.GetDayStart(monthStart), dayEnd, filter);
         var earliest = store.GetEarliestDate();
         double total = 0;
         var trackedDays = 0;
+        long sessionCount = store.GetSessionCount();
         if (earliest is not null)
         {
-            var series = store.GetDailySeries(earliest.Value, target);
+            var series = store.GetDailySeries(earliest.Value, target, filter);
             total = series.Sum(x => x.Seconds);
             trackedDays = series.Count(x => x.Seconds > 0);
+            if (filter is not null)
+            {
+                sessionCount = store.GetSessionsIntersecting(
+                    UsageTimeRange.GetDayStart(earliest.Value), dayEnd, filter).Count;
+            }
         }
-
+        var active = store.GetActiveSession();
+        if (filter is not null && active is not null && !filter(active)) active = null;
         return new OverviewDto
         {
             Date = target.ToString("yyyy-MM-dd"),
@@ -118,50 +159,57 @@ app.MapGet("/api/overview", (string? date) =>
             MonthSeconds = month,
             TotalSeconds = total,
             TrackedDays = trackedDays,
-            SessionCount = store.GetSessionCount(),
+            SessionCount = sessionCount,
             EarliestDate = earliest?.ToString("yyyy-MM-dd"),
-            Active = store.GetActiveSession(),
+            Active = active,
             DatabaseSizeMb = Math.Round(store.DatabaseSizeMb, 2)
         };
     });
-
+    if (payload is OverviewDto overview)
+    {
+        var active = store.GetActiveSession();
+        if (filter is not null && active is not null && !filter(active)) active = null;
+        overview.Active = active;
+    }
     return Json(payload!);
 });
 
-app.MapGet("/api/daily", (int? days) =>
+app.MapGet("/api/daily", (int? days, string? subject) =>
 {
     var count = Math.Clamp(days ?? 30, 1, 365);
     var today = UsageTimeRange.GetTimeDistributionDate(DateTime.Now);
     var from = today.AddDays(-(count - 1));
-    var payload = GetCached($"daily:{from:yyyy-MM-dd}:{count}", TimeSpan.FromSeconds(30),
-        () => store.GetDailySeries(from, today));
+    var filter = CreateSubjectFilter(subject, settingsReader);
+    var payload = GetCached($"daily:{from:yyyy-MM-dd}:{count}:{subject ?? string.Empty}", TimeSpan.FromSeconds(30),
+        () => store.GetDailySeries(from, today, filter));
     return Json(payload!);
 });
 
-app.MapGet("/api/range-summary", (string? from, string? to) =>
+app.MapGet("/api/range-summary", (string? from, string? to, string? subject) =>
 {
     var startDate = ParseDate(from);
     var endDate = ParseDate(to);
+    var filter = CreateSubjectFilter(subject, settingsReader);
     if (endDate < startDate)
     {
         (startDate, endDate) = (endDate, startDate);
     }
 
-    var payload = GetCached($"range-summary:{startDate:yyyy-MM-dd}:{endDate:yyyy-MM-dd}", TimeSpan.FromSeconds(20), () =>
+    var payload = GetCached($"range-summary:{startDate:yyyy-MM-dd}:{endDate:yyyy-MM-dd}:{subject ?? string.Empty}", TimeSpan.FromSeconds(20), () =>
     {
         var start = UsageTimeRange.GetDayStart(startDate);
         var end = UsageTimeRange.GetDayEnd(endDate);
-        var series = store.GetDailySeries(startDate, endDate);
-        var sessions = store.GetSessionsIntersecting(start, end);
-        var ranking = store.GetProcessStats(start, end).Take(10).ToList();
+        var series = store.GetDailySeries(startDate, endDate, filter);
+        var sessions = store.GetSessionsIntersecting(start, end, filter);
+        var ranking = store.GetProcessStats(start, end, filter).Take(10).ToList();
         return new
         {
             from = startDate.ToString("yyyy-MM-dd"),
             to = endDate.ToString("yyyy-MM-dd"),
-            seconds = store.GetSecondsInRange(start, end),
+            seconds = store.GetSecondsInRange(start, end, filter),
             trackedDays = series.Count(item => item.Seconds > 0),
             sessionCount = sessions.Count,
-            processCount = store.GetProcessStats(start, end).Count,
+            processCount = store.GetProcessStats(start, end, filter).Count,
             daily = series,
             ranking
         };
@@ -170,15 +218,16 @@ app.MapGet("/api/range-summary", (string? from, string? to) =>
     return Json(payload!);
 });
 
-app.MapGet("/api/ranking", (string? date, string? type, int? top) =>
+app.MapGet("/api/ranking", (string? date, string? type, int? top, string? subject) =>
 {
     var target = ParseDate(date);
     var start = UsageTimeRange.GetDayStart(target);
     var end = UsageTimeRange.GetDayEnd(target);
     var limit = Math.Clamp(top ?? 15, 1, 100);
     var bySubject = string.Equals(type, "subject", StringComparison.OrdinalIgnoreCase);
-    var payload = GetCached($"ranking:{target:yyyy-MM-dd}:{bySubject}:{limit}", TimeSpan.FromSeconds(20),
-        () => (object)(bySubject ? store.GetSubjectStats(start, end) : store.GetProcessStats(start, end))
+    var filter = CreateSubjectFilter(subject, settingsReader);
+    var payload = GetCached($"ranking:{target:yyyy-MM-dd}:{bySubject}:{limit}:{subject ?? string.Empty}", TimeSpan.FromSeconds(20),
+        () => (object)(bySubject ? store.GetSubjectStats(start, end, filter) : store.GetProcessStats(start, end, filter))
                       .Take(limit).ToList());
     return Json(payload!);
 });
@@ -295,7 +344,13 @@ app.MapGet("/api/settings", () =>
     return Json(payload!);
 });
 
-app.MapGet("/api/active", () => Json(store.GetActiveSession()));
+app.MapGet("/api/active", (string? subject) =>
+{
+    var active = store.GetActiveSession();
+    var filter = CreateSubjectFilter(subject, settingsReader);
+    if (filter is not null && active is not null && !filter(active)) active = null;
+    return Json(active);
+});
 
 app.MapGet("/api/web-preferences", () => Json(webPreferences.Load()));
 
@@ -364,6 +419,8 @@ app.MapGet("/api/browser-presence", () =>
 app.MapGet("/api/search", (string? q, int? skip, int? take) =>
     Json(store.Search(q, skip ?? 0, take ?? 50)));
 
+app.MapGet("/api/search-version", () => Json(new { version = store.GetSearchVersion() }));
+
 app.MapFallbackToFile("index.html");
 
 var url = $"http://127.0.0.1:{port}";
@@ -374,7 +431,7 @@ Application.SetCompatibleTextRenderingDefault(false);
 
 var runTask = app.RunAsync();
 _ = WarmWebCacheAsync(url, webPreferences, app.Lifetime.ApplicationStopping);
-using var tray = new TrayForm(app, url, args.Contains("--show"));
+using var tray = new TrayForm(app, url, args.Contains("--show"), webPreferences);
 Application.Run(tray);
 
 runTask.GetAwaiter().GetResult();
@@ -400,7 +457,6 @@ static async Task WarmWebCacheAsync(string baseUrl, WebPreferencesStore preferen
         foreach (var path in urls)
         {
             using var response = await client.GetAsync(path, cancellationToken).ConfigureAwait(false);
-            response.Dispose();
         }
     }
     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

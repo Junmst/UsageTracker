@@ -16,9 +16,9 @@
     <Company>时迹</Company>
     <Authors>时迹</Authors>
     <Copyright>Copyright © 2026 时迹</Copyright>
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Version>3.3.0</Version>
+    <AssemblyVersion>3.3.0.0</AssemblyVersion>
+    <FileVersion>3.3.0.0</FileVersion>
     <PackageId>时迹</PackageId>
     <Optimize>true</Optimize>
     <DebugType>none</DebugType>
@@ -60,10 +60,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\app-icon.ico" />
-    <Content Include="Assets\app-icon.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
+    <Resource Include="Assets\app-icon.png" />
   </ItemGroup>
 
 
