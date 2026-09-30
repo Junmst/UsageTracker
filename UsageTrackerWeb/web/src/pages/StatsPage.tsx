@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import LoadingTransition from '../components/LoadingTransition';
 import { api } from '../lib/api';
 import type { BucketStat, SubjectNodeDto } from '../lib/api';
+import { useDataChange } from '../lib/events';
 import { formatHoursMinutes } from '../lib/format';
 import type { ThemeController } from '../theme';
 
@@ -106,6 +107,10 @@ export default function StatsPage({ kind, date, theme }: Props) {
   const [tree, setTree] = useState<SubjectNodeDto[]>([]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [autoReloadToken, setAutoReloadToken] = useState(0);
+
+  // 后台数据/分类变化即局部自动刷新（分类统计尤其依赖关键词/手动分类的落盘变化）
+  useDataChange(() => setAutoReloadToken((value) => value + 1));
 
   useEffect(() => {
     let cancelled = false;
@@ -128,7 +133,7 @@ export default function StatsPage({ kind, date, theme }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [kind, date]);
+  }, [kind, date, autoReloadToken]);
 
   const maxSeconds = useMemo(() => Math.max(1, ...rows.map((x) => x.seconds)), [rows]);
   const maxTreeSeconds = useMemo(() => Math.max(1, ...tree.map((x) => x.seconds)), [tree]);

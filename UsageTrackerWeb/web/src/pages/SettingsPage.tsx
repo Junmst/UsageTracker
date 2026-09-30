@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import type { AgentStatus, Meta, SubjectDefinition, TransferPreview } from '../lib/api';
+import { useDataChange } from '../lib/events';
 import type { ThemeController } from '../theme';
 import type { DistributionMergeMode } from '../components/TimeDistribution';
 
@@ -45,17 +46,30 @@ export default function SettingsPage({
   const transferInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const refreshMetaSettings = () => {
+      void api.meta().then(setMeta).catch(() => undefined);
+      void api.settings().then((snapshot) => {
+        const value = snapshot.idleTimeoutMinutes ?? 1;
+        setIdleTimeoutMinutes(value);
+        setIdleTimeoutInput(String(value));
+      }).catch(() => undefined);
+    };
+    refreshMetaSettings();
+    const loadAgent = () => void api.agentStatus(false).then(setAgent).catch(() => setAgent(null));
+    loadAgent();
+    const timer = window.setInterval(loadAgent, 3000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  // 后台配置/数据变化（空闲时长、记录数、库大小等）自动更新，无需手动刷新
+  useDataChange(() => {
     void api.meta().then(setMeta).catch(() => undefined);
     void api.settings().then((snapshot) => {
       const value = snapshot.idleTimeoutMinutes ?? 1;
       setIdleTimeoutMinutes(value);
       setIdleTimeoutInput(String(value));
     }).catch(() => undefined);
-    const loadAgent = () => void api.agentStatus(false).then(setAgent).catch(() => setAgent(null));
-    loadAgent();
-    const timer = window.setInterval(loadAgent, 3000);
-    return () => window.clearInterval(timer);
-  }, []);
+  });
 
   const saveIdleTimeout = async () => {
     const trimmed = idleTimeoutInput.trim();

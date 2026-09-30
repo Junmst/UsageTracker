@@ -1312,6 +1312,11 @@ body.fog-animation-off::after {
   animation: orbit-ring-inner 12s linear infinite;
 }
 
+/* 切换分类高速加载时：三环更亮更醒目（旋转速度由 WAAPI playbackRate 控制） */
+.overview-hero.is-switching .overview-hero-orbit {
+  opacity: 1;
+}
+
 .orbit-loader {
   position: relative;
   width: var(--orbit-loader-size);
@@ -2021,6 +2026,85 @@ body.fog-animation-off::after {
   font-style: italic;
 }
 
+/* ── 使用明细：行与分类标签的平滑过渡动画 ── */
+/* 顶部新记录：渐显并从上方轻轻滑入；其他行由 FLIP 内联 transform 平滑下移 */
+.session-row.row-entering {
+  animation: session-row-enter 0.44s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes session-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 删除：先整行淡出，节点移除后剩余行由 FLIP 平滑上移 */
+.session-row.row-exiting {
+  animation: session-row-exit 0.24s ease-in both;
+  pointer-events: none;
+}
+@keyframes session-row-exit {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+
+/* 分类切换：旧标签左滑淡出，新标签从右侧滑入淡入 */
+.subject-badge {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.subject-badge-layer {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subject-badge-layer.is-entering {
+  animation: subject-badge-in 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.subject-badge-layer.is-leaving {
+  position: absolute;
+  top: 0;
+  left: 0;
+  animation: subject-badge-out 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes subject-badge-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes subject-badge-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
+
 .session-bulk-toolbar {
   display: flex;
   align-items: center;
@@ -2362,9 +2446,25 @@ body.fog-animation-off::after {
 }
 
 .subject-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 10px 14px;
-  color: var(--accent);
   font-size: 12px;
+  font-weight: 500;
+}
+.subject-status-bar.status-info {
+  color: var(--text-secondary);
+}
+.subject-status-bar.status-success {
+  color: #1f9d57;
+  background: rgba(31, 157, 87, 0.10);
+  border: 1px solid rgba(31, 157, 87, 0.28);
+}
+.subject-status-bar.status-error {
+  color: #d0342c;
+  background: rgba(208, 52, 44, 0.10);
+  border: 1px solid rgba(208, 52, 44, 0.30);
 }
 
 .subject-tree-grid,

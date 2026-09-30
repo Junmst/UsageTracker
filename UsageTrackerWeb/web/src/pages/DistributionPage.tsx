@@ -3,6 +3,7 @@ import LoadingTransition from '../components/LoadingTransition';
 import TimeDistribution, { type DistributionMergeMode } from '../components/TimeDistribution';
 import { api } from '../lib/api';
 import type { DistributionResponse, SubjectDefinition } from '../lib/api';
+import { useDataChange } from '../lib/events';
 import { formatDateKey, formatHoursMinutes, getTimeDistributionDate } from '../lib/format';
 import type { ThemeController } from '../theme';
 
@@ -216,6 +217,9 @@ export default function DistributionPage({ active, theme, subjects, mergeMode }:
     const timer = setInterval(() => void load(), REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [active, autoRefresh, load]);
+
+  // 后台数据/分类变化：当前可见时立即强刷（不等 15 秒自动刷新）
+  useDataChange(() => void load(true), active);
 
   const distributionTheme = {
     panel: theme.colors.panel,

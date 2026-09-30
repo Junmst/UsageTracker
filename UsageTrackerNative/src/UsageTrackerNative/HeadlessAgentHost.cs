@@ -248,11 +248,11 @@ internal sealed class HeadlessAgentHost : ITrayHost, IDisposable
                         canUndo = _undoActions.Count > 0
                     });
                 }
-                case "subject-add-major": return RunSubjectChange(() => _service.AddSubject(Arg("name") ?? string.Empty));
+                case "subject-add-major": return RunSubjectChangeEx(() => { var ok = _service.AddSubject(Arg("name") ?? string.Empty, out var error); return (ok, error); });
                 case "subject-remove-major": return RunSubjectChange(() => _service.RemoveSubject(Arg("name") ?? string.Empty));
                 case "subject-remove-majors": return RunSubjectChange(() => StringArrayArg("names").Count > 0 && StringArrayArg("names").All(_service.RemoveSubject));
-                case "subject-rename-major": return RunSubjectChange(() => _service.RenameSubject(Arg("oldName") ?? string.Empty, Arg("newName") ?? string.Empty));
-                case "subject-add-parent": return RunSubjectChange(() => _service.AddChildSubject(Arg("major") ?? string.Empty, Arg("name") ?? string.Empty));
+                case "subject-rename-major": return RunSubjectChangeEx(() => { var ok = _service.RenameSubject(Arg("oldName") ?? string.Empty, Arg("newName") ?? string.Empty, out var error); return (ok, error); });
+                case "subject-add-parent": return RunSubjectChangeEx(() => { var ok = _service.AddChildSubject(Arg("major") ?? string.Empty, Arg("name") ?? string.Empty, out var error); return (ok, error); });
                 case "subject-remove-parent": return RunSubjectChange(() => _service.RemoveChildSubject(Arg("major") ?? string.Empty, Arg("name") ?? string.Empty, ArgBool("promoteToParent")));
                 case "subject-remove-parents":
                 {
@@ -260,8 +260,8 @@ internal sealed class HeadlessAgentHost : ITrayHost, IDisposable
                     var names = StringArrayArg("names");
                     return RunSubjectChange(() => names.Count > 0 && names.All(name => _service.RemoveChildSubject(major, name, ArgBool("promoteToParent"))));
                 }
-                case "subject-rename-parent": return RunSubjectChange(() => _service.RenameChildSubject(Arg("major") ?? string.Empty, Arg("oldName") ?? string.Empty, Arg("newName") ?? string.Empty));
-                case "subject-add-child": return RunSubjectChange(() => _service.AddGrandChildSubject(Arg("major") ?? string.Empty, Arg("parent") ?? string.Empty, Arg("name") ?? string.Empty));
+                case "subject-rename-parent": return RunSubjectChangeEx(() => { var ok = _service.RenameChildSubject(Arg("major") ?? string.Empty, Arg("oldName") ?? string.Empty, Arg("newName") ?? string.Empty, out var error); return (ok, error); });
+                case "subject-add-child": return RunSubjectChangeEx(() => { var ok = _service.AddGrandChildSubject(Arg("major") ?? string.Empty, Arg("parent") ?? string.Empty, Arg("name") ?? string.Empty, out var error); return (ok, error); });
                 case "subject-remove-child": return RunSubjectChange(() => _service.RemoveGrandChildSubject(Arg("major") ?? string.Empty, Arg("parent") ?? string.Empty, Arg("name") ?? string.Empty, ArgBool("promoteToParent")));
                 case "subject-remove-children":
                 {
@@ -270,8 +270,8 @@ internal sealed class HeadlessAgentHost : ITrayHost, IDisposable
                     var names = StringArrayArg("names");
                     return RunSubjectChange(() => names.Count > 0 && names.All(name => _service.RemoveGrandChildSubject(major, parent, name, ArgBool("promoteToParent"))));
                 }
-                case "subject-rename-child": return RunSubjectChange(() => _service.RenameGrandChildSubject(Arg("major") ?? string.Empty, Arg("parent") ?? string.Empty, Arg("oldName") ?? string.Empty, Arg("newName") ?? string.Empty));
-                case "subject-add-keyword": return RunSubjectChange(() => _service.AddSubjectKeywordRule(Arg("subject") ?? string.Empty, Arg("keyword") ?? string.Empty));
+                case "subject-rename-child": return RunSubjectChangeEx(() => { var ok = _service.RenameGrandChildSubject(Arg("major") ?? string.Empty, Arg("parent") ?? string.Empty, Arg("oldName") ?? string.Empty, Arg("newName") ?? string.Empty, out var error); return (ok, error); });
+                case "subject-add-keyword": return RunSubjectChangeEx(() => { var ok = _service.AddSubjectKeywordRule(Arg("subject") ?? string.Empty, Arg("keyword") ?? string.Empty, out var error); return (ok, error); });
                 case "subject-remove-keyword": return RunSubjectChange(() => _service.RemoveSubjectKeywordRule(Arg("subject") ?? string.Empty, Arg("keyword") ?? string.Empty));
                 case "subject-remove-keywords":
                 {
@@ -279,7 +279,7 @@ internal sealed class HeadlessAgentHost : ITrayHost, IDisposable
                     var keywords = StringArrayArg("keywords");
                     return RunSubjectChange(() => keywords.Count > 0 && keywords.All(keyword => _service.RemoveSubjectKeywordRule(subject, keyword)));
                 }
-                case "subject-add-whitelist": return RunSubjectChange(() => _service.AddParallelActivityWhitelistProcess(Arg("process") ?? string.Empty));
+                case "subject-add-whitelist": return RunSubjectChangeEx(() => { var ok = _service.AddParallelActivityWhitelistProcess(Arg("process") ?? string.Empty, out var error); return (ok, error); });
                 case "subject-remove-whitelist": return RunSubjectChange(() => _service.RemoveParallelActivityWhitelistProcess(Arg("process") ?? string.Empty));
                 case "subject-remove-whitelist-processes": return RunSubjectChange(() => StringArrayArg("processes").Count > 0 && StringArrayArg("processes").All(_service.RemoveParallelActivityWhitelistProcess));
                 case "subject-set-delete-behavior":
@@ -301,7 +301,21 @@ internal sealed class HeadlessAgentHost : ITrayHost, IDisposable
                 {
                     RegisterUndo(() => _service.RestoreSettingsForUndo(before));
                 }
-                return changed ? new WebCommandResult(true) : new WebCommandResult(false, "操作失败：名称可能已存在、不可用或已被修改");
+                return changed ? new WebCommandResult(true) : new WebCommandResult(false, "操作未生效：内容可能已被修改或删除，请刷新后重试");
+            }
+
+            // 带具体失败原因的变更：service 返回 false 时把友好原因透传给网页
+            WebCommandResult RunSubjectChangeEx(Func<(bool Ok, string? Error)> change)
+            {
+                var before = _service.CreateStateForUndo();
+                var (changed, error) = change();
+                if (changed)
+                {
+                    RegisterUndo(() => _service.RestoreSettingsForUndo(before));
+                }
+                return changed
+                    ? new WebCommandResult(true)
+                    : new WebCommandResult(false, string.IsNullOrWhiteSpace(error) ? "操作未生效，请刷新后重试" : error);
             }
         }
         catch (Exception exception)

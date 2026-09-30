@@ -32,8 +32,9 @@ public sealed class UsageTrackerService : IDisposable
     public const string DataDirectoryName = AppDataDirectoryName;
     public const string DataFileNameForUninstall = "usage-tracker.db";
     private const string StartupRegistryValueName = "时迹";
-    private const string AppDataDirectoryName = "UsageTrackerNative_v2";
-    private const string SettingsDirectoryName = "时迹";
+    /// <summary>唯一数据目录：数据库、settings.json、web-preferences.json 全部存这里。</summary>
+    private const string AppDataDirectoryName = "时迹";
+    private const string SettingsDirectoryName = AppDataDirectoryName;
     private const string SettingsFileName = "settings.json";
     private const string LegacyAutoUnclassifiedLabel = "自动未分类";
     private const string ManualUnclassifiedLabel = "未分类";
@@ -142,9 +143,9 @@ public sealed class UsageTrackerService : IDisposable
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         _dataDirectory = Path.Combine(localAppData, AppDataDirectoryName);
-        // 配置存固定目录，不随数据目录迁移丢失
-        _settingsFilePath = Path.Combine(localAppData, SettingsDirectoryName, SettingsFileName);
-        MigrateLegacySettings(_dataDirectory, _settingsFilePath);
+        // 启动前把历史目录的库/配置一次性合并到唯一目录（已存在则跳过）
+        LegacyDataMigration.Run(localAppData, _dataDirectory);
+        _settingsFilePath = Path.Combine(_dataDirectory, SettingsFileName);
         _repository = UsageTrackerRepository.Create(_dataDirectory, _settingsFilePath);
         _pollTimer = new System.Threading.Timer(_ => RunSerialized(PollTimer_Tick), null, Timeout.Infinite, Timeout.Infinite);
         _idleClickTimer = new System.Threading.Timer(_ => RunSerialized(IdleClickTimer_Tick), null, Timeout.Infinite, Timeout.Infinite);
@@ -165,26 +166,10 @@ public sealed class UsageTrackerService : IDisposable
             throw;
         }
     }
-    /// <summary>旧数据目录的 settings.json 一次性迁移到固定目录。</summary>
-    private static void MigrateLegacySettings(string dataDirectory, string fixedPath)
-    {
-        var legacyPath = Path.Combine(dataDirectory, SettingsFileName);
-        if (!File.Exists(legacyPath) || File.Exists(fixedPath)) return;
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(fixedPath)!);
-            File.Copy(legacyPath, fixedPath);
-        }
-        catch
-        {
-            // 迁移失败不影响启动，用户重新设置即可
-        }
-    }
-
     public static UsageTrackerSettings LoadPersistedThemeSnapshot()
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var settingsFilePath = Path.Combine(localAppData, SettingsDirectoryName, SettingsFileName);
+        var settingsFilePath = Path.Combine(localAppData, AppDataDirectoryName, SettingsFileName);
         if (!File.Exists(settingsFilePath))
         {
             return new UsageTrackerSettings
@@ -363,17 +348,26 @@ public sealed class UsageTrackerService : IDisposable
     }
 
     public bool AddParallelActivityWhitelistProcess(string processName)
+        => AddParallelActivityWhitelistProcess(processName, out _);
+
+    public bool AddParallelActivityWhitelistProcess(string processName, out string? reason)
     {
         var normalized = NormalizeProcessName(processName);
-        if (string.IsNullOrWhiteSpace(normalized)
-            || _parallelActivityWhitelistProcesses.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(normalized))
         {
+            reason = "进程名不能为空";
+            return false;
+        }
+        if (_parallelActivityWhitelistProcesses.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+        {
+            reason = $"进程「{normalized}」已在白名单中，请勿重复添加";
             return false;
         }
 
         _parallelActivityWhitelistProcesses.Add(normalized);
         _parallelActivityWhitelistProcesses.Sort(StringComparer.OrdinalIgnoreCase);
         SaveState();
+        reason = null;
         return true;
     }
 
@@ -692,17 +686,26 @@ public sealed class UsageTrackerService : IDisposable
     {
         ImportSettingsData(state, ImportSettingsMode.Replace);
     }
-    public bool AddSubject(string subject)
+    public bool AddSubject(string subject) => AddSubject(subject, out _);
+
+    public bool AddSubject(string subject, out string? reason)
     {
         ReloadSubjectDefinitionsFromSettingsFile();
         subject = subject.Trim();
-        if (string.IsNullOrWhiteSpace(subject) || FindSubject(subject) is not null)
+        if (string.IsNullOrWhiteSpace(subject))
         {
+            reason = "大类名称不能为空";
+            return false;
+        }
+        if (FindSubject(subject) is not null)
+        {
+            reason = $"大类「{subject}」已存在，请勿重复添加";
             return false;
         }
         _subjectDefinitions.Add(new SubjectDefinition { Name = subject });
         SaveState();
         RaiseChanged(null, ActiveSession);
+        reason = null;
         return true;
     }
     public bool RemoveSubject(string subject)
@@ -725,75 +728,165 @@ public sealed class UsageTrackerService : IDisposable
         return true;
     }
     public bool RenameSubject(string oldSubject, string newSubject)
+        => RenameSubject(oldSubject, newSubject, out _);
+
+    public bool RenameSubject(string oldSubject, string newSubject, out string? reason)
     {
         ReloadSubjectDefinitionsFromSettingsFile();
         oldSubject = oldSubject.Trim();
         newSubject = newSubject.Trim();
         var existing = FindSubject(oldSubject);
-        if (existing is null || string.IsNullOrWhiteSpace(newSubject) || FindSubject(newSubject) is not null) return false;
+        if (existing is null)
+        {
+            reason = $"大类「{oldSubject}」不存在，可能已被修改，请刷新后重试";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(newSubject))
+        {
+            reason = "新的大类名称不能为空";
+            return false;
+        }
+        if (FindSubject(newSubject) is not null)
+        {
+            reason = $"大类「{newSubject}」已存在，请更换名称";
+            return false;
+        }
         existing.Name = newSubject;
         RenameSubjectReferences(oldSubject, newSubject);
         SaveState();
         RaiseChanged(null, ActiveSession);
+        reason = null;
         return true;
     }
 
     public bool RenameChildSubject(string majorSubject, string oldParentSubject, string newParentSubject)
+        => RenameChildSubject(majorSubject, oldParentSubject, newParentSubject, out _);
+
+    public bool RenameChildSubject(string majorSubject, string oldParentSubject, string newParentSubject, out string? reason)
     {
         ReloadSubjectDefinitionsFromSettingsFile();
         oldParentSubject = oldParentSubject.Trim();
         newParentSubject = newParentSubject.Trim();
         var major = FindSubject(majorSubject);
         var existing = major?.Parents.FirstOrDefault(x => string.Equals(x.Name, oldParentSubject, StringComparison.OrdinalIgnoreCase));
-        if (major is null || existing is null || string.IsNullOrWhiteSpace(newParentSubject) || major.Parents.Any(x => !ReferenceEquals(x, existing) && string.Equals(x.Name, newParentSubject, StringComparison.OrdinalIgnoreCase))) return false;
+        if (major is null || existing is null)
+        {
+            reason = $"父类「{oldParentSubject}」不存在，可能已被修改，请刷新后重试";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(newParentSubject))
+        {
+            reason = "新的父类名称不能为空";
+            return false;
+        }
+        if (major.Parents.Any(x => !ReferenceEquals(x, existing) && string.Equals(x.Name, newParentSubject, StringComparison.OrdinalIgnoreCase)))
+        {
+            reason = $"父类「{newParentSubject}」已存在于大类「{major.Name}」下，请更换名称";
+            return false;
+        }
         existing.Name = newParentSubject;
         RenameSubjectReferences(oldParentSubject, newParentSubject);
         SaveState();
         RaiseChanged(null, ActiveSession);
+        reason = null;
         return true;
     }
 
     public bool RenameGrandChildSubject(string majorSubject, string parentSubject, string oldChildSubject, string newChildSubject)
+        => RenameGrandChildSubject(majorSubject, parentSubject, oldChildSubject, newChildSubject, out _);
+
+    public bool RenameGrandChildSubject(string majorSubject, string parentSubject, string oldChildSubject, string newChildSubject, out string? reason)
     {
         ReloadSubjectDefinitionsFromSettingsFile();
         oldChildSubject = oldChildSubject.Trim();
         newChildSubject = newChildSubject.Trim();
         var parent = FindParentSubject(majorSubject, parentSubject);
-        if (parent is null || string.IsNullOrWhiteSpace(newChildSubject)) return false;
+        if (parent is null)
+        {
+            reason = $"父类「{parentSubject}」不存在，可能已被修改，请刷新后重试";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(newChildSubject))
+        {
+            reason = "新的子类名称不能为空";
+            return false;
+        }
         var index = parent.Children.FindIndex(x => string.Equals(x, oldChildSubject, StringComparison.OrdinalIgnoreCase));
-        if (index < 0 || parent.Children.Where((_, i) => i != index).Any(x => string.Equals(x, newChildSubject, StringComparison.OrdinalIgnoreCase))) return false;
+        if (index < 0)
+        {
+            reason = $"子类「{oldChildSubject}」不存在，可能已被修改，请刷新后重试";
+            return false;
+        }
+        if (parent.Children.Where((_, i) => i != index).Any(x => string.Equals(x, newChildSubject, StringComparison.OrdinalIgnoreCase)))
+        {
+            reason = $"子类「{newChildSubject}」已存在于父类「{parent.Name}」下，请更换名称";
+            return false;
+        }
         parent.Children[index] = newChildSubject;
         RenameSubjectReferences(oldChildSubject, newChildSubject);
         SaveState();
         RaiseChanged(null, ActiveSession);
+        reason = null;
         return true;
     }
+
     public bool AddChildSubject(string parentSubject, string childSubject)
+        => AddChildSubject(parentSubject, childSubject, out _);
+
+    public bool AddChildSubject(string parentSubject, string childSubject, out string? reason)
     {
         ReloadSubjectDefinitionsFromSettingsFile();
         var major = FindSubject(parentSubject);
         childSubject = childSubject.Trim();
-        if (major is null || string.IsNullOrWhiteSpace(childSubject) || major.Parents.Any(x => string.Equals(x.Name, childSubject, StringComparison.OrdinalIgnoreCase)))
+        if (major is null)
         {
+            reason = $"大类「{parentSubject}」不存在，可能已被修改，请刷新后重试";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(childSubject))
+        {
+            reason = "父类名称不能为空";
+            return false;
+        }
+        if (major.Parents.Any(x => string.Equals(x.Name, childSubject, StringComparison.OrdinalIgnoreCase)))
+        {
+            reason = $"父类「{childSubject}」已存在于大类「{major.Name}」下，请勿重复添加";
             return false;
         }
         major.Parents.Add(new SubjectParentDefinition { Name = childSubject });
         SaveState();
         RaiseChanged(null, ActiveSession);
+        reason = null;
         return true;
     }
+
     public bool AddGrandChildSubject(string majorSubject, string parentSubject, string childSubject)
+        => AddGrandChildSubject(majorSubject, parentSubject, childSubject, out _);
+
+    public bool AddGrandChildSubject(string majorSubject, string parentSubject, string childSubject, out string? reason)
     {
         ReloadSubjectDefinitionsFromSettingsFile();
         var parent = FindParentSubject(majorSubject, parentSubject);
         childSubject = childSubject.Trim();
-        if (parent is null || string.IsNullOrWhiteSpace(childSubject) || parent.Children.Any(x => string.Equals(x, childSubject, StringComparison.OrdinalIgnoreCase)))
+        if (parent is null)
         {
+            reason = $"父类「{parentSubject}」不存在，可能已被修改，请刷新后重试";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(childSubject))
+        {
+            reason = "子类名称不能为空";
+            return false;
+        }
+        if (parent.Children.Any(x => string.Equals(x, childSubject, StringComparison.OrdinalIgnoreCase)))
+        {
+            reason = $"子类「{childSubject}」已存在于父类「{parent.Name}」下，请勿重复添加";
             return false;
         }
         parent.Children.Add(childSubject);
         SaveState();
         RaiseChanged(null, ActiveSession);
+        reason = null;
         return true;
     }
     public IReadOnlyList<string> GetSubjectKeywordRules(string subject)
@@ -803,11 +896,20 @@ public sealed class UsageTrackerService : IDisposable
             : [];
     }
     public bool AddSubjectKeywordRule(string subject, string keyword)
+        => AddSubjectKeywordRule(subject, keyword, out _);
+
+    public bool AddSubjectKeywordRule(string subject, string keyword, out string? reason)
     {
         ReloadSubjectDefinitionsFromSettingsFile();
         keyword = keyword.Trim();
-        if (string.IsNullOrWhiteSpace(keyword) || !SubjectExists(subject))
+        if (string.IsNullOrWhiteSpace(keyword))
         {
+            reason = "关键词不能为空";
+            return false;
+        }
+        if (!SubjectExists(subject))
+        {
+            reason = $"分类「{subject}」不存在，可能已被修改，请刷新后重试";
             return false;
         }
         if (!_subjectKeywordRules.TryGetValue(subject, out var keywords))
@@ -817,6 +919,7 @@ public sealed class UsageTrackerService : IDisposable
         }
         if (keywords.Any(x => string.Equals(x, keyword, StringComparison.OrdinalIgnoreCase)))
         {
+            reason = $"关键词「{keyword}」已添加，请勿重复添加";
             return false;
         }
         keywords.Add(keyword);
@@ -825,6 +928,7 @@ public sealed class UsageTrackerService : IDisposable
         SaveSubjectKeywordRulesImmediately();
         SaveState();
         RaiseChanged(null, ActiveSession);
+        reason = null;
         return true;
     }
     public bool RemoveSubjectKeywordRule(string subject, string keyword)
@@ -1256,7 +1360,10 @@ public sealed class UsageTrackerService : IDisposable
         _manualSubjects.Clear();
         foreach (var pair in incoming.ManualSubjects ?? new Dictionary<string, string>())
         {
-            if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+            // 旧版“空分类”标记不再保留：置空即无手动覆盖，应重新接受关键词匹配
+            if (!string.IsNullOrWhiteSpace(pair.Key)
+                && !string.IsNullOrWhiteSpace(pair.Value)
+                && pair.Value != ClassificationResolver.EmptySubjectMarker)
             {
                 _manualSubjects[pair.Key] = pair.Value;
             }
@@ -1557,12 +1664,19 @@ public sealed class UsageTrackerService : IDisposable
         if (targetDate is null)
         {
             var classificationKey = BuildClassificationKey(session.ProcessName, session.WindowTitle);
-            _manualSubjects[classificationKey] = string.IsNullOrWhiteSpace(normalizedSubject)
-                ? ClassificationResolver.EmptySubjectMarker
-                : normalizedSubject;
+            if (string.IsNullOrWhiteSpace(normalizedSubject))
+            {
+                // 置空 = 删除手动标记，使该进程+标题重新接受关键词自动分类
+                _manualSubjects.Remove(classificationKey);
+            }
+            else
+            {
+                _manualSubjects[classificationKey] = normalizedSubject;
+            }
             foreach (var record in _history.Where(record => SessionMatches(record, session.ProcessName, session.WindowTitle)))
             {
-                record.ManualSubject = normalizedSubject;
+                record.ManualSubject = normalizedSubject
+                    ?? MatchSubjectByKeyword(record.ProcessName, record.WindowTitle);
             }
             SaveState();
             return;
@@ -1583,23 +1697,32 @@ public sealed class UsageTrackerService : IDisposable
             && !string.Equals(session.ProcessName, "UsageTrackerNative", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(session.ProcessName, "UsageTrackerNative.exe", StringComparison.OrdinalIgnoreCase))
         {
-            _manualSubjects[classificationKey] = string.IsNullOrWhiteSpace(normalizedSubject)
-                ? ClassificationResolver.EmptySubjectMarker
-                : normalizedSubject;
+            if (string.IsNullOrWhiteSpace(normalizedSubject))
+            {
+                // 置空 = 删除手动标记，使该进程+标题重新接受关键词自动分类
+                _manualSubjects.Remove(classificationKey);
+            }
+            else
+            {
+                _manualSubjects[classificationKey] = normalizedSubject;
+            }
             _settingsDirty = true;
         }
+        // 置空后立即按关键词重新归类：命中关键词则归入对应分类，都不命中才留空（前台显示空分类）
+        var effectiveSubject = normalizedSubject
+            ?? MatchSubjectByKeyword(session.ProcessName, session.WindowTitle);
         // 分类按“进程 + 窗口标题”生效：同一进程和窗口名称的全部记录一起更新。
         var dayStart = UsageTimeRange.GetDayStart(date);
         var dayEnd = dayStart.AddDays(1);
         var updatedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var record in _history.Where(record => InDay(record, dayStart, dayEnd) && SessionMatches(record, session.ProcessName, session.WindowTitle)))
         {
-            ApplySubjectToRecord(record, normalizedSubject, updatedIds);
+            ApplySubjectToRecord(record, effectiveSubject, updatedIds);
         }
         foreach (var record in _repository.GetSessionsByDate(date)
             .Where(record => SessionMatches(record, session.ProcessName, session.WindowTitle) && !updatedIds.Contains(record.Id)))
         {
-            ApplySubjectToRecord(record, normalizedSubject, updatedIds);
+            ApplySubjectToRecord(record, effectiveSubject, updatedIds);
         }
         // 兜底：内存与当日查询都没有命中时，仍按单条记录更新，避免界面点击无效果。
         if (updatedIds.Count == 0)
@@ -1607,13 +1730,13 @@ public sealed class UsageTrackerService : IDisposable
             var dbRecord = _repository.GetRecordById(session.Id);
             if (dbRecord is not null)
             {
-                ApplySubjectToRecord(dbRecord, normalizedSubject, updatedIds);
+                ApplySubjectToRecord(dbRecord, effectiveSubject, updatedIds);
             }
         }
         if (_activeRecord is not null && date == DateTime.Today
             && SessionMatches(_activeRecord, session.ProcessName, session.WindowTitle))
         {
-            _activeRecord.ManualSubject = normalizedSubject;
+            _activeRecord.ManualSubject = effectiveSubject;
         }
         SaveState();
     }
@@ -2565,6 +2688,12 @@ public sealed class UsageTrackerService : IDisposable
         _manualSubjects.Clear();
         foreach (var pair in state.ManualSubjects ?? new Dictionary<string, string>())
         {
+            // 旧版“空分类”标记不再保留：置空即无手动覆盖，应重新接受关键词匹配
+            if (pair.Value == ClassificationResolver.EmptySubjectMarker)
+            {
+                migratedLegacyUnclassified = true;
+                continue;
+            }
             var manualSubject = string.Equals(pair.Value, LegacyAutoUnclassifiedLabel, StringComparison.OrdinalIgnoreCase)
                 ? ManualUnclassifiedLabel
                 : pair.Value;
@@ -2758,6 +2887,11 @@ public sealed class UsageTrackerService : IDisposable
         _manualSubjects.Clear();
         foreach (var pair in settings.ManualSubjects ?? new Dictionary<string, string>())
         {
+            // 旧版“空分类”标记不再保留：置空即无手动覆盖，应重新接受关键词匹配
+            if (pair.Value == ClassificationResolver.EmptySubjectMarker)
+            {
+                continue;
+            }
             _manualSubjects[pair.Key] = string.Equals(pair.Value, LegacyAutoUnclassifiedLabel, StringComparison.OrdinalIgnoreCase)
                 ? ManualUnclassifiedLabel
                 : pair.Value;
@@ -3206,6 +3340,11 @@ public sealed class UsageTrackerService : IDisposable
         _manualSubjects.Clear();
         foreach (var pair in settings.ManualSubjects ?? new Dictionary<string, string>())
         {
+            // 旧版“空分类”标记不再保留：置空即无手动覆盖，应重新接受关键词匹配
+            if (pair.Value == ClassificationResolver.EmptySubjectMarker)
+            {
+                continue;
+            }
             _manualSubjects[pair.Key] = string.Equals(pair.Value, LegacyAutoUnclassifiedLabel, StringComparison.OrdinalIgnoreCase)
                 ? ManualUnclassifiedLabel
                 : pair.Value;
@@ -3684,16 +3823,17 @@ public sealed class UsageTrackerService : IDisposable
         foreach (var record in _history)
         {
             var classificationKey = BuildClassificationKey(record.ProcessName, record.WindowTitle);
-            var hasUserOverride = _manualSubjects.ContainsKey(classificationKey);
+            var hasUserOverride = _manualSubjects.TryGetValue(classificationKey, out var overrideSubject)
+                && overrideSubject != ClassificationResolver.EmptySubjectMarker;
 
             if (hasUserOverride)
             {
                 // User manually set this subject — respect it
-                record.ManualSubject = _manualSubjects[classificationKey];
+                record.ManualSubject = ClassificationResolver.NormalizeSubject(overrideSubject);
             }
             else
             {
-                // Auto-classified — re-evaluate with current rules
+                // Auto-classified (含被用户置空的记录) — re-evaluate with current keyword rules
                 record.ManualSubject = ResolveSubjectForNewSession(record);
                 lock (_saveLock)
                 {
@@ -3708,9 +3848,10 @@ public sealed class UsageTrackerService : IDisposable
         if (_activeRecord is not null)
         {
             var activeKey = BuildClassificationKey(_activeRecord.ProcessName, _activeRecord.WindowTitle);
-            if (_manualSubjects.TryGetValue(activeKey, out var activeOverride))
+            if (_manualSubjects.TryGetValue(activeKey, out var activeOverride)
+                && activeOverride != ClassificationResolver.EmptySubjectMarker)
             {
-                _activeRecord.ManualSubject = activeOverride;
+                _activeRecord.ManualSubject = ClassificationResolver.NormalizeSubject(activeOverride);
             }
             else
             {

@@ -175,12 +175,10 @@ internal static class NativeControlClient
         var baseDirectory = AppContext.BaseDirectory;
         var candidates = new[]
         {
-            Path.Combine(baseDirectory, "native", "时迹.exe"),
             Path.Combine(baseDirectory, "时迹.exe"),
+            Path.Combine(baseDirectory, "native", "时迹.exe"),
             Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", "UsageTrackerNative_publish", "时迹.exe")),
-            Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", "..", "UsageTrackerNative_publish", "时迹.exe")),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UsageTrackerNative", "时迹.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "时迹", "时迹.exe")
+            Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", "..", "UsageTrackerNative_publish", "时迹.exe"))
         };
         return candidates.FirstOrDefault(File.Exists);
     }

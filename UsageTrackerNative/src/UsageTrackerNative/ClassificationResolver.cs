@@ -13,9 +13,13 @@ public static class ClassificationResolver
         string? storedSubject = null)
     {
         var key = BuildKey(processName, windowTitle);
-        if (manualSubjects is not null && manualSubjects.TryGetValue(key, out var manual))
+        // 空分类标记表示“用户显式清除了手动分类”：不是一个真实分类，
+        // 必须继续向下走关键词匹配（命中则归类，都不命中才留空）。
+        if (manualSubjects is not null
+            && manualSubjects.TryGetValue(key, out var manual)
+            && manual != EmptySubjectMarker)
         {
-            return manual == EmptySubjectMarker ? null : NormalizeSubject(manual);
+            return NormalizeSubject(manual);
         }
 
         var matched = SearchExpressionMatcher.ResolveSubjectByKeywordRules(definitions, keywordRules, processName, windowTitle);

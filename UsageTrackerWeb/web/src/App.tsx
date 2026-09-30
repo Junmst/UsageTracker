@@ -10,6 +10,7 @@ import SubjectManagementPage from './pages/SubjectManagementPage';
 import StatsPage from './pages/StatsPage';
 import { api } from './lib/api';
 import type { RangeSummary, SettingsSnapshot, SubjectManagementSnapshot } from './lib/api';
+import { connectDataEvents, useDataChange } from './lib/events';
 import { formatDateKey, formatDateLabel, getTimeDistributionDate, parseDateKey } from './lib/format';
 import { useTheme } from './theme';
 import type { DistributionMergeMode } from './components/TimeDistribution';
@@ -30,6 +31,8 @@ export default function App() {
   const theme = useTheme(settings?.themeAccentColor);
 
   useEffect(() => {
+    // 建立全局后台变更推送连接（SSE，断线浏览器自动重连）
+    connectDataEvents();
     void api
       .settings()
       .then(setSettings)
@@ -53,6 +56,12 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  // 后台配置/分类变化（可能来自 Native 自动重匹配或其他看板操作）：自动更新全局分类数据
+  useDataChange(() => {
+    void api.settings().then(setSettings).catch(() => undefined);
+    void api.subjectManagement(true).then(setSubjectManagement).catch(() => undefined);
+  }, true, ['settings']);
 
   useEffect(() => {
     document.body.classList.toggle('fog-animation-off', !fogAnimation);

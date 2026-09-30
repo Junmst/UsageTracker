@@ -145,6 +145,11 @@ export interface TransferExportResult {
 const responseCache = new Map<string, { value: unknown; expiresAt: number }>();
 const pendingRequests = new Map<string, Promise<unknown>>();
 
+// 后台数据/配置变更后清空 GET 缓存，保证随后的自动刷新拿到最新数据而不是 15 秒内的旧响应
+export function invalidateResponseCache(): void {
+  responseCache.clear();
+}
+
 async function get<T>(url: string, ttlMs = 15_000, forceRefresh = false): Promise<T> {
   const cached = responseCache.get(url);
   if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
@@ -183,6 +188,7 @@ async function send<T>(url: string, method: 'POST' | 'DELETE', body?: unknown): 
     try {
       const errorData = await response.json();
       if (errorData?.message) message = errorData.message;
+      else if (errorData?.detail) message = errorData.detail;
     } catch { /* 错误响应不是 JSON，用默认消息 */ }
     throw new Error(message);
   }

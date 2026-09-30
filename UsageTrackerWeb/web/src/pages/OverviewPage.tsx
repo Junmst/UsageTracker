@@ -5,6 +5,7 @@ import LoadingTransition from '../components/LoadingTransition';
 import SubjectFilterMenu from '../components/SubjectFilterMenu';
 import { api } from '../lib/api';
 import type { BucketStat, DailyPoint, Overview, RangeSummary, SubjectDefinition } from '../lib/api';
+import { useDataChange } from '../lib/events';
 import { formatDateKey, formatDurationShort, formatHoursMinutes, parseDateKey } from '../lib/format';
 import type { ThemeController } from '../theme';
 
@@ -32,6 +33,65 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
   const [rangeLoading, setRangeLoading] = useState(false);
   const [rangeError, setRangeError] = useState('');
   const [clockNow, setClockNow] = useState(() => Date.now());
+  const [autoReloadToken, setAutoReloadToken] = useState(0);
+  const [switching, setSwitching] = useState(false);
+  const prevSubjectFilterRef = useRef(subjectFilter);
+
+  // 切换分类时三环的 WAAPI 速率控制：大加速度冲到极速并稳定，加载完成后同样曲线减速回正常
+  const orbitRef = useRef<HTMLDivElement>(null);
+  const orbitSpeedRef = useRef(1);
+  const orbitRafRef = useRef<number | null>(null);
+  const ORBIT_FULL_SPEED = 7.68;
+  const ORBIT_RAMP_UP_MS = 650;
+  const ORBIT_RAMP_DOWN_MS = 2800;
+
+  const rampOrbitSpeed = (target: number) => {
+    if (orbitRafRef.current !== null) window.cancelAnimationFrame(orbitRafRef.current);
+    const container = orbitRef.current;
+    if (!container) return;
+    const animations = Array.from(container.querySelectorAll('span')).flatMap((element) =>
+      element.getAnimations()
+    );
+    if (animations.length === 0) return;
+    const startSpeed = orbitSpeedRef.current;
+    const startedAt = performance.now();
+    // 减速段用更长时长，让“缓下来”的过程更平滑
+    const rampMs = target < startSpeed ? ORBIT_RAMP_DOWN_MS : ORBIT_RAMP_UP_MS;
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / rampMs);
+      // 提速用 ease-in（加速度渐强直至极速），减速用 ease-out-cubic（缓慢落回常速）
+      const eased = target > startSpeed
+        ? progress * progress
+        : 1 - Math.pow(1 - progress, 3);
+      const speed = startSpeed + (target - startSpeed) * eased;
+      orbitSpeedRef.current = speed;
+      animations.forEach((animation) => {
+        animation.playbackRate = speed;
+      });
+      if (progress < 1) {
+        orbitRafRef.current = window.requestAnimationFrame(tick);
+      } else {
+        orbitRafRef.current = null;
+      }
+    };
+    orbitRafRef.current = window.requestAnimationFrame(tick);
+  };
+
+  useEffect(() => {
+    rampOrbitSpeed(switching ? ORBIT_FULL_SPEED : 1);
+    return () => {
+      if (orbitRafRef.current !== null) window.cancelAnimationFrame(orbitRafRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [switching]);
+
+  useEffect(() => () => {
+    if (orbitRafRef.current !== null) window.cancelAnimationFrame(orbitRafRef.current);
+    orbitSpeedRef.current = 1;
+  }, []);
+
+  // 后台数据/分类变化即局部自动刷新（无需手动刷新页面）
+  useDataChange(() => setAutoReloadToken((value) => value + 1));
 
   useEffect(() => {
     const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
@@ -55,7 +115,7 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
     return () => {
       cancelled = true;
     };
-  }, [subjectFilter]);
+  }, [subjectFilter, overviewRange, autoReloadToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,6 +137,10 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
 
   useEffect(() => {
     let cancelled = false;
+    // 仅分类筛选真正变化才显示“切换分类”加载态；初次进入、翻日期、SSE 自动刷新不显示
+    const filterChanged = prevSubjectFilterRef.current !== subjectFilter;
+    prevSubjectFilterRef.current = subjectFilter;
+    if (filterChanged) setSwitching(true);
     const load = (forceRefresh = false) => {
       void Promise.all([
         api.overview(date, subjectFilter, forceRefresh),
@@ -89,15 +153,18 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
           setDaily(d);
           setTop(r);
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => {
+          if (!cancelled && filterChanged) setSwitching(false);
+        });
     };
-    load(refreshToken > 0);
+    load(refreshToken > 0 || autoReloadToken > 0);
     const timer = window.setInterval(() => load(true), 10000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [date, subjectFilter, refreshToken]);
+  }, [date, subjectFilter, refreshToken, autoReloadToken]);
 
   const fallbackOverview: Overview = {
     date,
@@ -223,12 +290,16 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
         </div>
       </div>
 
-      <section className="overview-hero panel">
+      <section className={`overview-hero panel${switching ? ' is-switching' : ''}`}>
         <div className="overview-hero-copy">
           <span className="eyebrow">TODAY'S RHYTHM</span>
-          <h3>{active ? '专注正在继续' : '今天的记录已准备好'}</h3>
-          <p title={activeTitle}>
-            {active ? activeTitle : `已累计记录 ${displayedOverview.sessionCount.toLocaleString()} 条使用会话`}
+          <h3>{switching ? '正在切换分类' : active ? '专注正在继续' : '今天的记录已准备好'}</h3>
+          <p title={switching ? undefined : activeTitle}>
+            {switching
+              ? '正在快速统计该分类的使用数据，请稍候…'
+              : active
+                ? activeTitle
+                : `已累计记录 ${displayedOverview.sessionCount.toLocaleString()} 条使用会话`}
           </p>
         </div>
         <div className="overview-hero-focus">
@@ -236,7 +307,7 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
           <strong>{formatHoursMinutes(displayedOverview.todaySeconds)}</strong>
           <small>{topProcess ? `最常使用 · ${topProcess.key}` : '等待更多活动数据'}</small>
         </div>
-        <div className="overview-hero-orbit" aria-hidden="true">
+        <div className="overview-hero-orbit" ref={orbitRef} aria-hidden="true">
           <span />
           <span />
           <span />

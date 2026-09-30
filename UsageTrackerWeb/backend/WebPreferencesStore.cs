@@ -22,15 +22,21 @@ public sealed class WebPreferencesStore
         MigrateLegacyConfig(dataDirectory);
     }
 
-    /// <summary>旧数据目录的配置一次性迁移到固定目录。</summary>
+    /// <summary>历史目录的偏好配置一次性迁移到固定目录（取最新的一份）。</summary>
     private void MigrateLegacyConfig(string dataDirectory)
     {
-        var legacyPath = Path.Combine(dataDirectory, "web-preferences.json");
-        if (!File.Exists(legacyPath) || File.Exists(_path)) return;
+        if (File.Exists(_path)) return;
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var source = new[] { "UsageTrackerNative_v2", "UsageTrackerNative" }
+            .Select(name => Path.Combine(localAppData, name, "web-preferences.json"))
+            .Where(File.Exists)
+            .OrderByDescending(File.GetLastWriteTime)
+            .FirstOrDefault();
+        if (source is null) return;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.Copy(legacyPath, _path);
+            File.Copy(source, _path);
         }
         catch
         {

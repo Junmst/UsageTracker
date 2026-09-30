@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import LoadingTransition from '../components/LoadingTransition';
 import SearchModeMenu from '../components/SearchModeMenu';
 import DatePickerPopover from '../components/DatePickerPopover';
-import { api } from '../lib/api';
+import SubjectBadge from '../components/SubjectBadge';
+import { api, invalidateResponseCache } from '../lib/api';
 import type { SessionDto, SubjectDefinition } from '../lib/api';
+import { useDataChange } from '../lib/events';
 import { formatDurationShort, formatHoursMinutes, formatDateKey, getTimeDistributionDate } from '../lib/format';
 
 const PAGE_SIZE = 50;
@@ -27,12 +29,14 @@ export default function SessionsPage() {
   const [loading, setLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [collapsedContextMajors, setCollapsedContextMajors] = useState<Set<string>>(new Set());
+  const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const pointerRef = useRef<{ id: string; x: number; y: number; moved: boolean; pointerId: number } | null>(null);
   const suppressClickRef = useRef(false);
   const anchorIdRef = useRef<string | null>(null);
+  const forceReloadRef = useRef<() => void>(() => undefined);
 
   const selectedItems = useMemo(() => items.filter((item) => selectedIds.has(item.id)), [items, selectedIds]);
   const selectedIdList = selectedId ? (selectedIds.has(selectedId) ? [...selectedIds] : [selectedId]) : [];
@@ -48,12 +52,13 @@ export default function SessionsPage() {
   useEffect(() => {
     let cancelled = false;
     let version = '';
-    const load = async (force = false) => {
+    const load = async (options: { force?: boolean; silent?: boolean } = {}) => {
+      const { force = false, silent = false } = options;
       try {
         const current = await api.searchVersion(true);
         if (!force && current.version === version) return;
         version = current.version;
-        setLoading(true);
+        if (!silent) setLoading(true);
         const result = await api.search(query, skip, PAGE_SIZE, true, {
           date: selectedDate,
           allHistory,
@@ -68,11 +73,12 @@ export default function SessionsPage() {
       } catch {
         // 保留当前列表，等待下一轮检测。
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && !silent) setLoading(false);
       }
     };
 
-    void load(true);
+    void load({ force: true });
+    forceReloadRef.current = () => void load({ force: true, silent: true });
     const timer = window.setInterval(() => void load(), 5000);
     const onFocus = () => void load();
     window.addEventListener('focus', onFocus);
@@ -82,6 +88,71 @@ export default function SessionsPage() {
       window.removeEventListener('focus', onFocus);
     };
   }, [query, skip, selectedDate, allHistory, mode]);
+
+  // FLIP：新记录在顶部渐显滑入，其余行平滑下移；删除时剩余行平滑上移。
+  // 翻页/搜索/切日期（id 集合整体替换）不做动画，避免长距离漂移。
+  const rowPositionsRef = useRef(new Map<string, number>());
+  const prevIdsRef = useRef<string[]>([]);
+  useLayoutEffect(() => {
+    const currentIds = items.map((item) => item.id);
+    const prevIds = prevIdsRef.current;
+    const prevIdSet = new Set(prevIds);
+    const currentPositions = new Map<string, number>();
+    rowRefs.current.forEach((element, id) => {
+      currentPositions.set(id, element.getBoundingClientRect().top);
+    });
+
+    // 顶部插入：上一轮的首行在本轮向下移动到第 insertedCount 位
+    let insertedCount = 0;
+    if (prevIds.length > 0 && currentIds.length >= prevIds.length) {
+      const idx = currentIds.indexOf(prevIds[0]);
+      if (idx > 0 && idx <= 8) insertedCount = idx;
+    }
+    // 纯删除：本轮所有 id 上一轮都存在，且数量变少
+    const pureRemoval =
+      prevIds.length > 0 &&
+      currentIds.length < prevIds.length &&
+      currentIds.every((id) => prevIdSet.has(id));
+    const animate = insertedCount > 0 || pureRemoval;
+
+    if (animate) {
+      const enterIds = new Set<string>();
+      if (insertedCount > 0) {
+        for (let i = 0; i < insertedCount; i += 1) enterIds.add(currentIds[i]);
+      }
+      rowRefs.current.forEach((element, id) => {
+        if (enterIds.has(id)) {
+          element.classList.remove('row-flip');
+          element.classList.add('row-entering');
+          window.setTimeout(() => element.classList.remove('row-entering'), 480);
+          return;
+        }
+        const before = rowPositionsRef.current.get(id);
+        const after = currentPositions.get(id);
+        if (before === undefined || after === undefined) return;
+        const delta = before - after;
+        if (Math.abs(delta) <= 0.5) return;
+        // 第一帧放回旧位置，下一帧过渡到自然位置，形成平滑位移
+        element.classList.remove('row-entering');
+        element.style.transition = 'none';
+        element.style.transform = `translateY(${delta}px)`;
+        element.offsetHeight; // 强制 reflow
+        element.style.transition = 'transform 0.38s cubic-bezier(0.22, 1, 0.36, 1)';
+        element.style.transform = '';
+        const clear = () => {
+          element.style.transition = '';
+          element.style.transform = '';
+        };
+        window.setTimeout(clear, 420);
+      });
+    }
+
+    rowPositionsRef.current = currentPositions;
+    prevIdsRef.current = currentIds;
+  }, [items]);
+
+  // 后台任何变化（手动分类、关键词自动重匹配、记录增删）：静默局部重载，不闪 loading、不等轮询
+  useDataChange(() => forceReloadRef.current());
 
   const pageIndex = Math.floor(skip / PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -134,9 +205,13 @@ export default function SessionsPage() {
         subject,
         targetDate: allHistory ? null : selectedDate,
       });
-      const keys = new Set(targets.map((item) => `${item.processName}\u0000${item.windowTitle}`));
-      setItems((current) => current.map((entry) => keys.has(`${entry.processName}\u0000${entry.windowTitle}`) ? { ...entry, manualSubject: subject } : entry));
-      setActionMessage('分类已更新（同进程同窗口名称的记录一并生效）');
+      // 不预判最终分类：置空后后台会立即按关键词重新匹配（可能变为其他分类）。
+      // 失效 GET 缓存后立即强刷拿后端实时解析结果；之后落盘变化再由 SSE 自动刷新。
+      invalidateResponseCache();
+      forceReloadRef.current();
+      setActionMessage(subject === null
+        ? '已清除分类标记，并按关键词重新匹配分类'
+        : '分类已更新（同进程同窗口名称的记录一并生效）');
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : '修改失败');
     } finally {
@@ -153,10 +228,14 @@ export default function SessionsPage() {
     try {
       await api.bulkDeleteSessions(targets);
       const removed = new Set(targets.map((item) => item.id));
-      setItems((current) => current.filter((entry) => !removed.has(entry.id)));
-      setTotal((current) => Math.max(0, current - removed.size));
+      // 两阶段：先让被删行淡出，再移除节点，剩余行由 FLIP 平滑上移
       setSelectedIds(new Set());
       setSelectedId(null);
+      setExitingIds(removed);
+      await new Promise((resolve) => window.setTimeout(resolve, 240));
+      setItems((current) => current.filter((entry) => !removed.has(entry.id)));
+      setTotal((current) => Math.max(0, current - removed.size));
+      setExitingIds(new Set());
       setCanUndoAction(true);
       setActionMessage(`已删除 ${removed.size} 条记录，可撤销`);
     } catch (error) {
@@ -429,7 +508,7 @@ export default function SessionsPage() {
               const seconds = item.durationSeconds ?? (end ? (end.getTime() - start.getTime()) / 1000 : 0);
               return (
                 <div
-                  className={`session-row${selectedIds.has(item.id) ? ' active' : ''}`}
+                  className={`session-row${selectedIds.has(item.id) ? ' active' : ''}${exitingIds.has(item.id) ? ' row-exiting' : ''}`}
                   key={item.id}
                   data-session-id={item.id}
                   ref={(element) => {
@@ -456,9 +535,7 @@ export default function SessionsPage() {
                     {end ? formatDurationShort(seconds) : `进行中 · ${formatDurationShort(seconds)}`}
                     {seconds > 3600 && <small>{formatHoursMinutes(seconds)}</small>}
                   </span>
-                  <span className={`session-subject-text${item.manualSubject ? '' : ' muted'}`} title={item.manualSubject ?? '空分类'}>
-                    {item.manualSubject ?? '空分类'}
-                  </span>
+                  <SubjectBadge subject={item.manualSubject} />
                 </div>
               );
             })}

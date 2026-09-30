@@ -570,7 +570,7 @@ public sealed class TrayForm : Form
 
     private static string GetDatabasePath()
     {
-        var dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UsageTrackerNative");
+        var dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "时迹");
         var path = Path.Combine(dataDirectory, "usage-tracker.db");
         return File.Exists(path) ? path : $"{dataDirectory}（未找到数据库）";
     }
@@ -668,13 +668,16 @@ public sealed class TrayForm : Form
     {
         if (_statusWindow is null || _statusWindow.IsDisposed)
         {
-            _statusWindow = new CompactStatusForm(ShowLauncher);
+            _statusWindow = new CompactStatusForm(ShowLauncher, OpenDashboardFromStatus);
         }
         _statusWindow.ShowStatus();
     }
 
     private void ShowLauncher()
     {
+        // 启动器与小窗保持在同一虚拟桌面（若小窗固定在所有桌面则本窗口也已固定）
+        VirtualDesktopHelper.PinToAllDesktops(Handle);
+        VirtualDesktopHelper.BringToSameDesktop(_statusWindow?.Handle ?? IntPtr.Zero, Handle);
         if (Visible && WindowState != FormWindowState.Minimized)
         {
             Activate();
@@ -685,6 +688,14 @@ public sealed class TrayForm : Form
         Show();
         WindowState = FormWindowState.Normal;
         Activate();
+    }
+
+    // 小窗双击：打开网页看板，并召唤到小窗所在的虚拟桌面
+    private void OpenDashboardFromStatus()
+    {
+        _dashboard ??= new DashboardForm(_url, OpenExternalBrowserAsync);
+        _dashboard.ShowDashboard();
+        VirtualDesktopHelper.BringToSameDesktop(_statusWindow?.Handle ?? IntPtr.Zero, _dashboard.Handle);
     }
 
     private void LoadHotkey()
@@ -828,6 +839,13 @@ public sealed class TrayForm : Form
         base.WndProc(ref message);
     }
 
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        // 启动器固定到所有虚拟桌面，与小窗保持在同一视图
+        VirtualDesktopHelper.PinToAllDesktops(Handle);
+    }
+
     protected override void OnHandleDestroyed(EventArgs e)
     {
         UnregisterBrowserHotkey();
@@ -851,7 +869,8 @@ public sealed class TrayForm : Form
         _lastBrowserLaunchAt = DateTime.UtcNow;
         _dashboard ??= new DashboardForm(_url, OpenExternalBrowserAsync);
         _dashboard.ShowDashboard();
-        await Task.CompletedTask;
+        VirtualDesktopHelper.BringToSameDesktop(_statusWindow?.Handle ?? IntPtr.Zero, _dashboard.Handle);
+        await System.Threading.Tasks.Task.CompletedTask;
     }
 
     private async Task OpenExternalBrowserAsync()

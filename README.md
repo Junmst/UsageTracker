@@ -9,7 +9,7 @@
 [![Runtime](https://img.shields.io/badge/.NET-8%20self--contained-8A2BE2)](https://github.com/Junmst/UsageTracker/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](#-许可证)
 
-### [⬇️ 点击下载最新版（解压即用）](https://github.com/Junmst/UsageTracker/releases/download/v4.0.0/shiji-v4.0.0-web-win-x64.zip)
+### [⬇️ 点击下载最新版（解压即用）](https://github.com/Junmst/UsageTracker/releases/download/v4.1.0/shiji-v4.1.0-web-win-x64.zip)
 
 <img src="docs/screenshots/overview.png" width="100%" alt="总览页 —— 每日使用节奏与应用排行"/>
 
@@ -31,6 +31,14 @@
 - **空闲判定自定义** —— 1–1440 分钟自由设置，本地持久化保存
 - **深浅色主题** —— 深色 / 浅色 / 跟随系统 + 34 色强调色预设 + 面板透明度调节
 - **数据完全本地** —— 无需联网注册；支持使用数据 / 分类配置 / 完整备份的导入导出，导入前预览与冲突统计
+
+## 🆕 v4.1.0 新特性
+
+- **SSE 后台数据变更自动局部刷新** —— 任意页面操作或后台自动重分类后，前端自动局部更新，无需手动刷新
+- **总览页切换分类动效** —— 三环动画先以极大加速度提速至极速稳定旋转，加载完成后以同样加速度减速回常速；状态卡片实时显示"正在切换分类"
+- **桌面小窗交互升级** —— 右键打开启动器不再关闭小窗；双击左键直接打开网页看板；支持上下左右四边 0px 间隙吸附
+- **网页看板窗口优化** —— 默认尺寸调整为 1707×1093；标题栏与 WebView2 底色随 Web 深浅色主题自动切换
+- **虚拟桌面支持** —— 小窗、启动器、看板自动固定到所有 Windows 虚拟桌面，从任意桌面均可快速召唤
 
 ## 🖼️ 界面预览
 

@@ -10,10 +10,15 @@ internal sealed class CompactStatusForm : Form
     private readonly SmoothMarqueeLabel _titleLabel = new();
     private readonly Label _durationLabel = new();
     private readonly Action _showLauncher;
+    private readonly Action _showDashboard;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 1000 };
+    private readonly System.Windows.Forms.Timer _singleClickTimer = new();
     private Point _dragStart;
     private Point _dragStartLocation;
     private bool _movedDuringDrag;
+    private Point _lastClickUpLocation;
+    private DateTime _lastClickUpTime = DateTime.MinValue;
+    private bool _clickReleaseBelongsToDoubleClick;
 
     protected override bool ShowWithoutActivation => true;
 
@@ -42,6 +47,8 @@ internal sealed class CompactStatusForm : Form
     {
         base.OnHandleCreated(e);
         ApplyRoundedRegion();
+        // 小窗固定到所有虚拟桌面（任务视图 / Win+Tab 的每个桌面都可见）
+        VirtualDesktopHelper.PinToAllDesktops(Handle);
     }
 
     protected override void OnSizeChanged(EventArgs e)
@@ -60,9 +67,16 @@ internal sealed class CompactStatusForm : Form
         }
     }
 
-    public CompactStatusForm(Action showLauncher)
+    public CompactStatusForm(Action showLauncher, Action showDashboard)
     {
         _showLauncher = showLauncher;
+        _showDashboard = showDashboard;
+        _singleClickTimer.Interval = SystemInformation.DoubleClickTime;
+        _singleClickTimer.Tick += (_, _) =>
+        {
+            _singleClickTimer.Stop();
+            _ = EnterManualIdleAsync();
+        };
         Text = "时迹 · 记录状态";
         FormBorderStyle = FormBorderStyle.None;
         ControlBox = false;
@@ -116,6 +130,22 @@ internal sealed class CompactStatusForm : Form
     {
         if (e.Button == MouseButtons.Left)
         {
+            // 第二次按下落在双击时间/范围之内 → 判定双击：打开网页看板，并取消待执行的单击空闲
+            if (_singleClickTimer.Enabled)
+            {
+                var elapsed = DateTime.UtcNow - _lastClickUpTime;
+                var delta = Cursor.Position - new Size(_lastClickUpLocation);
+                var clickSize = SystemInformation.DoubleClickSize;
+                if (elapsed.TotalMilliseconds <= SystemInformation.DoubleClickTime
+                    && Math.Abs(delta.X) <= clickSize.Width
+                    && Math.Abs(delta.Y) <= clickSize.Height)
+                {
+                    _singleClickTimer.Stop();
+                    _clickReleaseBelongsToDoubleClick = true;
+                    _showDashboard();
+                    return;
+                }
+            }
             _dragStart = e.Location;
             _dragStartLocation = Location;
             _movedDuringDrag = false;
@@ -135,7 +165,7 @@ internal sealed class CompactStatusForm : Form
         _dragStart = Point.Empty;
         if (e.Button == MouseButtons.Right)
         {
-            Hide();
+            // 右键只打开启动器，小窗本身保持显示
             _showLauncher();
         }
         else if (e.Button == MouseButtons.Left)
@@ -143,11 +173,19 @@ internal sealed class CompactStatusForm : Form
             if (_movedDuringDrag)
             {
                 SnapToEdge();
+                return;
             }
-            else
+            // 这次释放是双击的第二下：不触发单击空闲
+            if (_clickReleaseBelongsToDoubleClick)
             {
-                _ = EnterManualIdleAsync();
+                _clickReleaseBelongsToDoubleClick = false;
+                return;
             }
+            // 延迟一个双击判定窗口再执行单击空闲，避免双击打开看板时误触发
+            _lastClickUpLocation = Cursor.Position;
+            _lastClickUpTime = DateTime.UtcNow;
+            _singleClickTimer.Stop();
+            _singleClickTimer.Start();
         }
     }
 
@@ -160,8 +198,8 @@ internal sealed class CompactStatusForm : Form
     public void ShowStatus()
     {
         var area = Screen.FromPoint(Cursor.Position).WorkingArea;
-        // 默认位置：屏幕正中上方吸顶（贴近工作区顶部，左右居中）。
-        Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + 10);
+        // 默认位置：屏幕正中上方吸顶（贴近工作区顶部，左右居中），与吸边间隙一致不留空隙
+        Location = new Point(area.Left + (area.Width - Width) / 2, area.Top);
         Show();
         WindowState = FormWindowState.Normal;
         TopMost = true;
@@ -178,7 +216,7 @@ internal sealed class CompactStatusForm : Form
     {
         var area = Screen.FromPoint(Location).WorkingArea;
         const int snapThreshold = 24;
-        const int edgeMargin = 10;
+        const int edgeMargin = 0;
 
         var newX = Location.X;
         var newY = Location.Y;
@@ -193,6 +231,9 @@ internal sealed class CompactStatusForm : Form
         // 顶部吸附
         if (Location.Y - area.Top < snapThreshold)
             newY = area.Top + edgeMargin;
+        // 底部吸附
+        else if (area.Bottom - (Location.Y + Height) < snapThreshold)
+            newY = area.Bottom - Height - edgeMargin;
 
         if (newX != Location.X || newY != Location.Y)
             Location = new Point(newX, newY);
@@ -273,6 +314,8 @@ internal sealed class CompactStatusForm : Form
         {
             _timer.Stop();
             _timer.Dispose();
+            _singleClickTimer.Stop();
+            _singleClickTimer.Dispose();
             _titleLabel.Dispose();
         }
         base.Dispose(disposing);

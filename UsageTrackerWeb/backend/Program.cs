@@ -23,7 +23,7 @@ for (var i = 0; i < args.Length - 1; i++)
 
 var dataDirectory = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-    "UsageTrackerNative_v2");
+    "时迹");
 var settingsReader = new SettingsReader(dataDirectory);
 var store = new ReadOnlyStore(dataDirectory, settingsReader);
 var webPreferences = new WebPreferencesStore(dataDirectory);
@@ -654,6 +654,77 @@ app.MapGet("/api/search", (string? q, int? skip, int? take, string? date, bool? 
 });
 
 app.MapGet("/api/search-version", () => Json(new { version = store.GetSearchVersion() }));
+
+// 数据变更推送（SSE）：后台任何数据/配置落盘后，前端无需手动刷新即可局部更新。
+// - settings 事件：settings.json / web-preferences.json 的修改时间变化
+//   （手动分类、关键词重匹配、规则增删、热键、空闲时长、区间等所有配置类写入）
+// - data 事件：记录集结构签名变化（新记录、记录结束、删除；不含进行中记录的秒级抖动）
+app.MapGet("/api/events", async (HttpContext context) =>
+{
+    var response = context.Response;
+    response.Headers.ContentType = "text/event-stream";
+    response.Headers.CacheControl = "no-cache";
+    response.Headers.Connection = "keep-alive";
+
+    var settingsPath = Path.Combine(dataDirectory, "settings.json");
+    var preferencesPath = Path.Combine(dataDirectory, "web-preferences.json");
+
+    string ReadSettingsSignature()
+    {
+        var a = File.GetLastWriteTimeUtc(settingsPath).Ticks;
+        var b = File.GetLastWriteTimeUtc(preferencesPath).Ticks;
+        return $"{a}:{b}";
+    }
+
+    var stream = response.Body;
+    var token = context.RequestAborted;
+
+    async Task SendEvent(string eventName, string payload)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes($"event: {eventName}\ndata: {payload}\n\n");
+        await stream.WriteAsync(bytes, token);
+        await stream.FlushAsync(token);
+    }
+
+    // 先建立基线，连接时不推送，避免打开看板就触发一轮无谓刷新。
+    var lastSettings = ReadSettingsSignature();
+    var lastData = store.GetDataSignature();
+
+    while (!token.IsCancellationRequested)
+    {
+        try
+        {
+            await Task.Delay(2000, token);
+        }
+        catch (OperationCanceledException)
+        {
+            break;
+        }
+
+        string currentSettings;
+        string currentData;
+        try
+        {
+            currentSettings = ReadSettingsSignature();
+            currentData = store.GetDataSignature();
+        }
+        catch
+        {
+            continue; // 查询瞬时失败（DB 被独占等）下一轮再试
+        }
+
+        if (currentSettings != lastSettings)
+        {
+            lastSettings = currentSettings;
+            await SendEvent("settings", currentSettings);
+        }
+        if (currentData != lastData)
+        {
+            lastData = currentData;
+            await SendEvent("data", currentData);
+        }
+    }
+});
 
 app.MapFallbackToFile("index.html");
 

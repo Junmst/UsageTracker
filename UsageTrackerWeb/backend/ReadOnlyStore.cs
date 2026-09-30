@@ -313,6 +313,26 @@ public sealed class ReadOnlyStore
         return Convert.ToString(command.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
     }
 
+    // 记录集结构签名：新增/结束/删除记录时变化。
+    // 有意排除“进行中记录每秒推进的 EndTime”，避免 SSE 因活跃会话持续抖动。
+    // 分类列(ManualSubject)变化不体现在此 —— 分类操作一定会同步写 settings.json，由文件信号捕获。
+    public string GetDataSignature()
+    {
+        if (!DatabaseExists) return "no-db";
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*) || '|'
+                || COALESCE(SUM(CASE WHEN IsDeleted = 1 THEN 1 ELSE 0 END), 0) || '|'
+                || COALESCE(MAX(StartTime), '') || '|'
+                || COALESCE((SELECT EndTime FROM UsageSessions
+                             WHERE IsDeleted = 0 AND EndTime IS NOT NULL
+                             ORDER BY StartTime DESC LIMIT 1), '')
+            FROM UsageSessions
+            """;
+        return Convert.ToString(command.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
     public SearchResultDto Search(string? keyword, int skip, int take)
     {
         if (!DatabaseExists)
