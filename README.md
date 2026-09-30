@@ -1,200 +1,107 @@
-<p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=6,11,20&height=200&section=header&text=%E6%97%B6%E8%BF%B9&fontSize=60&fontColor=f0f0f0&animation=fadeIn&fontAlignY=35&desc=UsageTracker%20for%20Windows&descSize=18&descAlignY=55" alt="时迹" width="600"/>
-</p>
+<div align="center">
 
-<p align="center">
-  <b>让每一秒电脑使用时间，清晰可见</b>
-</p>
+# 时迹 · UsageTracker
 
-<p align="center">
-  <a href="https://github.com/Junmst/UsageTracker/releases/latest">
-    <img src="https://img.shields.io/badge/📥-下载最新版-4ECDC4?style=for-the-badge&logo=github" alt="下载"/>
-  </a>
-  <a href="https://dotnet.microsoft.com/">
-    <img src="https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&style=flat-square" alt=".NET 8"/>
-  </a>
-  <a href="https://github.com/dotnet/wpf">
-    <img src="https://img.shields.io/badge/WPF-Native-blue?logo=windows&style=flat-square" alt="WPF"/>
-  </a>
-  <a href="https://www.sqlite.org/">
-    <img src="https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&style=flat-square" alt="SQLite"/>
-  </a>
-  <a href="./UsageTrackerNativeV2/LICENSE">
-    <img src="https://img.shields.io/badge/License-MIT-success?style=flat-square" alt="MIT"/>
-  </a>
-</p>
+**Windows 本地使用时长记录工具 —— 自动记录 · 智能空闲判定 · 时间脉络可视化**
+
+[![Release](https://img.shields.io/github/v/release/Junmst/UsageTracker)](https://github.com/Junmst/UsageTracker/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-blue)](https://github.com/Junmst/UsageTracker/releases/latest)
+[![Runtime](https://img.shields.io/badge/.NET-8%20self--contained-8A2BE2)](https://github.com/Junmst/UsageTracker/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](#-许可证)
+
+### [⬇️ 点击下载最新版（解压即用）](https://github.com/Junmst/UsageTracker/releases/latest)
+
+<img src="docs/screenshots/overview.png" width="100%" alt="总览页 —— 每日使用节奏与应用排行"/>
+
+*总览 · 每日使用节奏与应用排行*
+
+</div>
 
 ---
 
-## ✨ 这是什么？
+## ✨ 特性一览
 
-**时迹** 是一款轻量、静默的 Windows 桌面应用。它运行在系统托盘里，自动追踪你打开的每一个软件、每一个窗口——用了多久、什么时候用、按什么分类。所有数据存在本地，用图表直观呈现，帮你搞清楚自己的时间都去了哪里。
+- **自动记录** —— 后台采样前台窗口，精确到进程名与窗口标题，SQLite 本地持久化
+- **智能空闲判定** —— 看视频、听音乐、阅读等无键鼠输入场景不误判：音频会话检测 + 前台视频播放识别 + 多进程映射（如腾讯视频 QQLive 及其子进程）
+- **真实标题识别** —— 基于 UI Automation 读取浏览器标签页、本地 PDF 等真实标题，而不是只记一个"学习"
+- **时间分布图** —— Canvas 高性能时间轴：滚轮缩放、拖动、惯性滑动，按天分行的使用脉络一览无余
+- **三级分类体系** —— 大类 / 父类 / 子类 + 关键词规则 + 手动指定，自动归类每一段使用会话
+- **桌面小窗** —— 呼吸灯实时呈现记录 / 空闲 / 看视频状态；吸顶吸附屏幕顶缘、拖动自动吸边、单击进入手动空闲
+- **全局快捷键** —— 自定义组合键，一键手动进入 / 退出空闲
+- **空闲判定自定义** —— 1–1440 分钟自由设置，本地持久化保存
+- **深浅色主题** —— 深色 / 浅色 / 跟随系统 + 34 色强调色预设 + 面板透明度调节
+- **数据完全本地** —— 无需联网注册；支持使用数据 / 分类配置 / 完整备份的导入导出，导入前预览与冲突统计
 
-**不需要手动打卡，不需要联网注册，安装即用。**
+## 🖼️ 界面预览
 
----
+| 使用明细 | 时间分布 |
+| --- | --- |
+| <img src="docs/screenshots/sessions.png" width="100%" alt="使用明细"/> | <img src="docs/screenshots/distribution.png" width="100%" alt="时间分布"/> |
+| **分类统计** | **设置** |
+| <img src="docs/screenshots/categories.png" width="100%" alt="分类统计"/> | <img src="docs/screenshots/settings.png" width="100%" alt="设置"/> |
 
-## 🎯 核心功能
+## 📦 下载即用
 
-<table>
-<tr>
-<td width="50%">
+1. 从 [**Releases**](https://github.com/Junmst/UsageTracker/releases/latest) 下载 `shiji-v*-web-win-x64.zip`
+2. 完整解压到任意目录（不要只复制单个 exe）
+3. 双击 **`时迹Web.exe`** —— 启动器自动运行 `native\时迹.exe` 开始后台记录
+4. 从系统托盘图标或启动器打开网页看板
 
-### ⏱ 自动追踪
-- 后台每秒采样活跃窗口
-- 自动检测空闲 / 休眠 / 关机
-- 精确划分会话时间边界
-- 视频播放时不会被误判为空闲
+> 💡 无需安装 .NET 运行时，压缩包已包含全部依赖。Windows 10/11 x64。
+> 数据保存在本地 `%LocalAppData%\UsageTrackerNative`，卸载只需删除目录。
 
-</td>
-<td width="50%">
+## 🏗️ 架构
 
-### 📊 时间分布图
-- 基于 DrawingVisual 高性能渲染
-- 日 / 周 / 月视图自由切换
-- 鼠标滚轮缩放、拖拽平移
-- 点击条形查看窗口详情
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-### 🏷 智能分类
-- 三级分类体系：大类 → 父类 → 子类
-- 关键词规则自动归类进程
-- 支持导入导出分类配置
-- 按分类查看使用统计
-
-</td>
-<td width="50%">
-
-### 📋 会话明细
-- 每条使用记录精确到秒
-- 支持多选、框选批量操作
-- 右键删除可撤销（最多 10 步）
-- 搜索、筛选、分类归档
-
-</td>
-</tr>
-</table>
-
----
-
-## 🚀 v3.3 快速开始
-
-### 直接使用（推荐）
-
-1. 前往 [v3.3 发布页](https://github.com/Junmst/UsageTracker/releases/tag/v3.3) 下载 `shiji-v3.3-web-win-x64.zip`
-2. 解压到任意目录（不要只解压单个 exe）
-3. 双击 `时迹Web.exe` 启动启动器
-4. 启动器会自动启动同一压缩包内 `native\时迹.exe`，后台记录使用时长且默认不显示时迹窗口
-5. 需要查看网页看板时，从启动器或系统托盘打开
-
-> **推荐只下载 Web 启动器压缩包即可直接使用。** v3.3 下载包已经包含网页启动器和内置的 `native\时迹.exe` 后台记录程序，不需要另外下载时迹程序。
->
-> 无需安装 .NET 运行时，发布版已包含完整运行时。
-
-### 从源码构建
-
-<details>
-<summary><b>📖 展开构建说明</b></summary>
-
-**环境要求**
-- Windows 10/11 x64
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-
-**构建**
-```bash
-cd UsageTrackerNativeV2/src/UsageTrackerNative
-dotnet build -c Release
+```text
+┌────────────────────────────────┐       Named Pipe        ┌────────────────────────────┐
+│  时迹Web.exe                    │ ◄─────────────────────► │  native\时迹.exe            │
+│  · 托盘启动器 + 桌面小窗         │                         │  · 前台窗口采样             │
+│  · WebView2 网页看板            │   web: 命令 / 查询       │  · UIA 真实标题读取         │
+│  · ASP.NET Core Minimal API    │   native: 会话数据       │  · 空闲 / 音频 / 视频检测    │
+│  · React + TypeScript + Vite   │                         │  · SQLite (WAL) 持久化      │
+└────────────────────────────────┘                         └────────────────────────────┘
 ```
 
-**发布自包含版本**
-```bash
-dotnet publish -c Release -r win-x64 --self-contained true -o ./publish
+| 目录 | 说明 |
+| --- | --- |
+| `UsageTrackerNative/` | 无窗口后台记录代理（前台采样、UIA 标题、空闲/媒体检测、SQLite） |
+| `UsageTrackerWeb/web/` | React + TypeScript + Vite 前端 |
+| `UsageTrackerWeb/backend/` | ASP.NET Core 启动器、Minimal API、托盘 / 小窗 / WebView2 壳 |
+| `UsageTrackerNative/tests/` | 核心逻辑回归测试（日界线、跨日裁剪、表达式匹配、分类优先级） |
+
+Web 与 Native 通过 Named Pipe 通信；Web 端以只读方式访问 SQLite（WAL 模式），读写分离互不阻塞。
+
+## 🛠️ 从源码构建
+
+环境要求：Windows 10/11 x64、.NET 8 SDK、Node.js 18+。
+
+```powershell
+# 1. 前端
+cd UsageTrackerWeb/web
+npm ci
+npm run build
+
+# 2. Web 后端（启动器 + 看板 + API）
+cd ..\backend
+dotnet publish -c Release -r win-x64 --self-contained true -o ..\..\publish
+
+# 3. Native 后台记录代理
+cd ..\..\UsageTrackerNative\src\UsageTrackerNative
+dotnet publish -c Release -r win-x64 --self-contained true -o ..\..\..\publish\native
 ```
 
-</details>
+> `UsageTrackerWeb/backend/UsageTrackerWeb.csproj` 默认在 `dotnet build/publish` 前自动执行前端构建；离线或只验证后端时可加 `-p:SkipFrontendBuild=true`。
+> 发布顺序必须先 Web 后端、后 Native：启动器只会启动同目录 `publish\native\时迹.exe`，缺少该子目录时看板无法读写数据。
 
----
+## 🧪 自动化测试
 
-## 🏗 技术架构
-
-```
-UsageTrackerNativeV2/src/UsageTrackerNative/
-├── Shell/                          # 模块化 Shell 框架
-│   ├── ShellWindow                 #   主窗口，原生标题栏
-│   ├── AppModuleDefinition         #   模块定义
-│   └── ModuleRegistry             #   模块注册表
-│
-├── Modules/                        # 七大功能模块
-│   ├── Overview/                   #   总览 — 统计卡片 + 日期导航
-│   ├── Sessions/                   #   会话明细 — 列表 / 搜索 / 删除 / 撤销
-│   ├── TimeDistribution/          #   时间分布图 — DrawingVisual 渲染引擎
-│   ├── Stats/                      #   进程统计 + 分类统计
-│   ├── Settings/                   #   设置 — 主题 / 导入导出 / 自启动
-│   └── SubjectManagement/          #   分类管理 — 三级层级 + 关键词规则
-│
-├── TimeDistribution/               # 分布图渲染引擎
-│   ├── TimeDistributionControl     #   主控件（世界坐标系 + 视口变换）
-│   ├── VisualHost × 3             #   背景层 / 内容层 / 叠加层
-│   ├── GridLayer                   #   网格线
-│   ├── SessionBarLayer             #   会话条形图
-│   ├── DateLabelLayer              #   日期标签列
-│   ├── HeaderAxisLayer             #   时间轴
-│   └── SelectionLayer              #   选中高亮
-│
-├── UsageTrackerService.cs          # 核心服务：采样 → 存储 → 导入导出
-├── UsageTrackerRepository.cs       # SQLite 数据仓储（WAL 模式）
-└── MediaPlaybackMonitor.cs         # 音频会话监控（视频播放空闲保护）
+```powershell
+cd UsageTrackerNative\tests\UsageTrackerNative.Tests
+dotnet test -c Release
 ```
 
-### 渲染引擎
-
-时间分布图采用 **DrawingVisual + 视口变换** 架构，不同于 WPF DataGrid 等重量级控件：
-
-- **世界坐标** 以分钟为单位，`Zoom` × `Offset` 控制可见区域
-- **鼠标中心缩放** — 滚轮缩放以鼠标位置为锚点，焦点不偏移
-- **8 个独立渲染层** 分离绘制职责，交互时仅刷新变化层
-- **跨日裁剪** — 会话条按日期边界自动切分，支持多日连续视图
-- **平滑滚动** — 惯性滚动 + 平移动画，手感流畅
-
-### 数据层
-
-- **SQLite WAL 模式**，读写不互相阻塞
-- **心跳检测** — 启动时校验 `LastCapturedAt`，超过 2 分钟自动收束异常会话
-- **跨日查询** — 单次 SQL 查取跨日会话，应用层裁剪到目标日期范围
-- **JSON 导入导出** — 支持全量数据迁移，兼容旧版 JSON 格式
-
----
-
-## 📁 项目结构
-
-```
-UsageTrackerNativeV2/
-├── src/UsageTrackerNative/         # 主项目源码
-│   ├── App.xaml(.cs)              # 应用入口、托盘图标、主题管理
-│   ├── V2AppContext.cs            # 全局上下文：服务、选中日期、主题状态
-│   ├── Shell/                     # 模块化导航框架
-│   ├── Modules/                   # 7 个功能模块
-│   ├── TimeDistribution/          # 图表渲染引擎
-│   ├── Resources/                 # 多语言资源（zh-CN / en-US）
-│   └── Assets/                    # 图标、字体等
-├── README.md                      # 本文件
-└── LICENSE                        # MIT 许可证
-```
-
----
+覆盖 4:00 日界线、跨日时长裁剪、搜索表达式匹配、直属子类规则和手动分类优先级。
 
 ## 📄 许可证
 
-[MIT License](./UsageTrackerNativeV2/LICENSE) · 自由使用，随意修改。
-
-源码位于 [UsageTrackerNativeV2/](./UsageTrackerNativeV2/) 目录。
-
----
-
-<p align="center">
-  <sub>Built with ❤️ and WPF · 数据存于本地，隐私由你掌控</sub>
-</p>
+本项目使用 [MIT License](UsageTrackerNative/LICENSE)。

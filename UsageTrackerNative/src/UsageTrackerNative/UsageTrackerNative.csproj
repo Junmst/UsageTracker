@@ -1,0 +1,124 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>时迹</AssemblyName>
+    <RootNamespace>UsageTrackerNative</RootNamespace>
+    <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
+    <Product>时迹</Product>
+    <Title>时迹</Title>
+    <Description>电脑进程使用时长统计工具</Description>
+    <Company>时迹</Company>
+    <Authors>时迹</Authors>
+    <Copyright>Copyright © 2026 时迹</Copyright>
+    <Version>3.3.0</Version>
+    <AssemblyVersion>3.3.0.0</AssemblyVersion>
+    <FileVersion>3.3.0.0</FileVersion>
+    <PackageId>时迹</PackageId>
+    <Optimize>true</Optimize>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <TieredPGO>true</TieredPGO>
+    <!-- 散装部署：无需解压，冷启动更快 -->
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>false</PublishTrimmed>
+    <!-- WinForms 不支持完整裁剪；改为仅裁剪可安全裁剪的 Microsoft 程序集 -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <TieredPGO>true</TieredPGO>
+    <!-- 散装部署：无需解压，冷启动更快 -->
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <!-- 不发布多余的语言包 -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!-- 仅裁剪非 Windows Desktop 框架的托管程序集，保留 WinForms/UIA 完整 -->
+  <ItemGroup>
+    <TrimmableAssembly Include="Microsoft.*" />
+    <TrimmableAssembly Include="System.*" />
+  </ItemGroup>
+
+  <!-- UI Automation：读取浏览器选中标签页的真实页面标题（随 .NET Desktop SDK 提供） -->
+  <ItemGroup>
+    <Reference Include="UIAutomationClient">
+      <HintPath>$(NETCoreTargetingPackRoot)\Microsoft.WindowsDesktop.App.Ref\8.0.27\ref\net8.0\UIAutomationClient.dll</HintPath>
+    </Reference>
+    <Reference Include="UIAutomationTypes">
+      <HintPath>$(NETCoreTargetingPackRoot)\Microsoft.WindowsDesktop.App.Ref\8.0.27\ref\net8.0\UIAutomationTypes.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <!-- 本地 DLL 引用（绕过 NuGet restore 损坏） -->
+  <ItemGroup>
+    <Reference Include="Microsoft.Data.Sqlite">
+      <HintPath>..\..\lib\Microsoft.Data.Sqlite.dll</HintPath>
+    </Reference>
+    <Reference Include="SQLitePCLRaw.batteries_v2">
+      <HintPath>..\..\lib\SQLitePCLRaw.batteries_v2.dll</HintPath>
+    </Reference>
+    <Reference Include="SQLitePCLRaw.core">
+      <HintPath>..\..\lib\SQLitePCLRaw.core.dll</HintPath>
+    </Reference>
+    <Reference Include="SQLitePCLRaw.provider.e_sqlite3">
+      <HintPath>..\..\lib\SQLitePCLRaw.provider.e_sqlite3.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <!-- 原生 SQLite DLL -->
+  <ItemGroup>
+    <Content Include="..\..\lib\native\win-x64\e_sqlite3.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>e_sqlite3.dll</Link>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app-icon.ico" />
+    <Resource Include="Assets\app-icon.png" />
+  </ItemGroup>
+
+  <!-- This project is the Windows headless recording agent used by the Web launcher. -->
+  <ItemGroup>
+    <Compile Remove="App.xaml.cs" />
+    <Compile Remove="MainWindow.xaml.cs" />
+    <Compile Remove="CompactSessionWindow.xaml.cs" />
+    <Compile Remove="DeletionChoiceDialog.xaml.cs" />
+    <Compile Remove="Converters.cs" />
+    <Compile Remove="LocalizationService.cs" />
+    <Compile Remove="NativeControlPipeClient.cs" />
+    <Compile Remove="Shell\**\*.cs" />
+    <Compile Remove="Modules\**\*.cs" />
+    <Compile Remove="TimeDistribution\**\*.cs" />
+    <Compile Remove="CheckDatabase.csx" />
+    <Page Remove="**\*.xaml" />
+    <ApplicationDefinition Remove="App.xaml" />
+  </ItemGroup>
+
+  <!-- 发布后删除 WPF 冗余程序集（Desktop SDK 捆绑，但 Native 只用 WinForms） -->
+  <Target Name="RemoveWpfAssemblies" AfterTargets="Publish">
+    <ItemGroup>
+      <!-- 只删纯 WPF UI 框架 DLL；PresentationCore/PresentationNative_cor3/WindowsBase 等 UIA 依赖必须保留 -->
+      <WpfFiles Include="$(PublishDir)\PresentationFramework.dll" />
+      <WpfFiles Include="$(PublishDir)\PresentationFramework.Aero.dll" />
+      <WpfFiles Include="$(PublishDir)\PresentationFramework.Luna.dll" />
+      <WpfFiles Include="$(PublishDir)\PresentationUI.dll" />
+      <WpfFiles Include="$(PublishDir)\ReachFramework.dll" />
+      <WpfFiles Include="$(PublishDir)\System.Windows.Controls.Ribbon.dll" />
+      <WpfFiles Include="$(PublishDir)\System.Windows.Input.Manipulations.dll" />
+      <WpfFiles Include="$(PublishDir)\System.Windows.Presentation.dll" />
+      <WpfFiles Include="$(PublishDir)\zh-Hans\PresentationFramework*.resources.dll" />
+      <WpfFiles Include="$(PublishDir)\zh-Hans\PresentationUI.resources.dll" />
+      <WpfFiles Include="$(PublishDir)\zh-Hans\ReachFramework.resources.dll" />
+    </ItemGroup>
+    <Delete Files="@(WpfFiles)" />
+    <Message Text="已删除 WPF 冗余程序集: @(WpfFiles->Count()) 个" Importance="high" />
+  </Target>
+
+</Project>

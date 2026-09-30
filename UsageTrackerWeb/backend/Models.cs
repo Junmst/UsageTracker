@@ -8,9 +8,19 @@ public sealed class SessionDto
     public DateTime StartTime { get; set; }
     public DateTime? EndTime { get; set; }
     public string? ManualSubject { get; set; }
+    public List<ParallelActivityDto> ParallelActivities { get; set; } = new();
     public DateTime? LastCapturedAt { get; set; }
     public double DurationSeconds { get; set; }
     public bool IsRunning => EndTime is null;
+}
+
+public sealed class ParallelActivityDto
+{
+    public string ProcessName { get; set; } = string.Empty;
+    public string WindowTitle { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public double ObservedSeconds { get; set; }
+    public bool CountInTotal { get; set; }
 }
 
 public sealed class BucketStatDto

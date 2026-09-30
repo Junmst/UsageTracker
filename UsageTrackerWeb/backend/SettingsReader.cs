@@ -13,7 +13,11 @@ public sealed class SettingsReader
 
     public SettingsReader(string dataDirectory)
     {
-        _settingsPath = Path.Combine(dataDirectory, "settings.json");
+        // 配置存固定目录，不随数据目录迁移丢失（与 Native 侧一致）
+        _settingsPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "时迹",
+            "settings.json");
     }
 
     private static readonly JsonSerializerOptions Options = new()
@@ -50,6 +54,8 @@ public sealed class SettingsSnapshot
     public List<string>? ThemeAccentRecentColors { get; set; }
     public List<string>? ThemeAccentSlots { get; set; }
     public int? IdleTimeoutMinutes { get; set; }
+    public Dictionary<string, string>? ManualSubjects { get; set; }
+    public Dictionary<string, List<string>>? SubjectKeywordRules { get; set; }
     public List<SubjectDefinitionDto>? SubjectDefinitions { get; set; }
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import LoadingTransition from '../components/LoadingTransition';
 import { api } from '../lib/api';
 import type { BucketStat, SubjectNodeDto } from '../lib/api';
-import { formatHoursMinutes, formatDateLabel, parseDateKey } from '../lib/format';
+import { formatHoursMinutes } from '../lib/format';
 import type { ThemeController } from '../theme';
 
 interface Props {
@@ -150,22 +150,12 @@ export default function StatsPage({ kind, date, theme }: Props) {
     });
   };
 
-  const title = kind === 'process' ? '进程统计' : '分类统计';
   const badge = kind === 'process' ? `${rows.length} 个进程` : `${tree.length} 个大类`;
   const itemCount = kind === 'process' ? rows.reduce((total, row) => total + row.sessionCount, 0) : tree.reduce((total, node) => total + node.sessionCount, 0);
   const duration = kind === 'process' ? totalSeconds : totalTreeSeconds;
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div>
-          <h2>{title}</h2>
-          <div className="page-subtitle">
-            {formatDateLabel(parseDateKey(date))} · {badge}
-          </div>
-        </div>
-      </div>
-
       <div className="insight-strip">
         <div className="insight-item">
           <span className="insight-label">统计范围</span>
@@ -234,7 +224,7 @@ export default function StatsPage({ kind, date, theme }: Props) {
             />
           ))}
           {tree.length === 0 && (
-            <div className="loading">该日期没有已归类记录（未归类不计入分类统计）</div>
+            <div className="loading">该日期没有已归类记录（空分类不计入分类统计）</div>
           )}
         </div>
       )}

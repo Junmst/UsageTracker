@@ -14,7 +14,28 @@ public sealed class WebPreferencesStore
 
     public WebPreferencesStore(string dataDirectory)
     {
-        _path = Path.Combine(dataDirectory, "web-preferences.json");
+        // 配置存固定用户目录，不随数据目录迁移而丢失
+        _path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "时迹",
+            "web-preferences.json");
+        MigrateLegacyConfig(dataDirectory);
+    }
+
+    /// <summary>旧数据目录的配置一次性迁移到固定目录。</summary>
+    private void MigrateLegacyConfig(string dataDirectory)
+    {
+        var legacyPath = Path.Combine(dataDirectory, "web-preferences.json");
+        if (!File.Exists(legacyPath) || File.Exists(_path)) return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+            File.Copy(legacyPath, _path);
+        }
+        catch
+        {
+            // 迁移失败不影响启动，用户重新设置即可
+        }
     }
 
     public WebPreferencesSnapshot Load()
@@ -41,10 +62,9 @@ public sealed class WebPreferencesStore
 
     public WebPreferencesSnapshot SaveRange(string from, string to)
     {
-        var snapshot = new WebPreferencesSnapshot
-        {
-            OverviewRange = new SavedOverviewRange(from, to),
-        };
+        // 先 Load 再改：新建快照整文件覆盖会清掉热键等其他偏好。
+        var snapshot = Load();
+        snapshot.OverviewRange = new SavedOverviewRange(from, to);
         Save(snapshot);
         return snapshot;
     }
@@ -60,6 +80,19 @@ public sealed class WebPreferencesStore
     {
         var snapshot = Load();
         snapshot.BrowserHotkey = new SavedBrowserHotkey
+        {
+            Modifiers = modifiers,
+            Key = key,
+            Gesture = gesture,
+        };
+        Save(snapshot);
+    }
+
+    /// <summary>持久化“手动空闲”快捷键（启动器自定义槽）。</summary>
+    public void SaveManualIdleHotkey(uint modifiers, uint key, string gesture)
+    {
+        var snapshot = Load();
+        snapshot.ManualIdleHotkey = new SavedBrowserHotkey
         {
             Modifiers = modifiers,
             Key = key,
@@ -91,6 +124,7 @@ public sealed class WebPreferencesSnapshot
 {
     public SavedOverviewRange? OverviewRange { get; set; }
     public SavedBrowserHotkey? BrowserHotkey { get; set; }
+    public SavedBrowserHotkey? ManualIdleHotkey { get; set; }
 }
 
 public sealed class SavedBrowserHotkey

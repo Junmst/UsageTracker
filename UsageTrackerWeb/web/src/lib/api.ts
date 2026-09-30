@@ -5,8 +5,17 @@ export interface SessionDto {
   startTime: string;
   endTime?: string | null;
   manualSubject?: string | null;
+  parallelActivities?: ParallelActivityDto[];
   lastCapturedAt?: string | null;
   durationSeconds?: number;
+}
+
+export interface ParallelActivityDto {
+  processName: string;
+  windowTitle: string;
+  description: string;
+  observedSeconds: number;
+  countInTotal: boolean;
 }
 
 export interface BucketStat {
@@ -74,6 +83,19 @@ export interface WebPreferences {
   overviewRange?: { from: string; to: string } | null;
 }
 
+export interface AgentStatus {
+  running: boolean;
+  tracking: boolean;
+  isIdle: boolean;
+  isManualIdle: boolean;
+  isVideoPlayback?: boolean;
+  activeProcessName?: string | null;
+  activeWindowTitle?: string | null;
+  activeStartTime?: string | null;
+  lastCapturedAt?: string | null;
+  error?: string;
+}
+
 export interface SettingsSnapshot {
   theme: string | null;
   themeAccentColor: string | null;
@@ -81,12 +103,44 @@ export interface SettingsSnapshot {
   themeAccentSlots: string[];
   subjectCount: number;
   subjectDefinitions: SubjectDefinition[];
+  idleTimeoutMinutes?: number | null;
+}
+
+export interface SubjectManagementSnapshot {
+  subjectDefinitions: SubjectDefinition[];
+  keywordRules: Record<string, string[]>;
+  parallelWhitelistProcesses: string[];
+  deleteBehavior: 'MatchRules' | 'PromoteToParent' | string;
+  canUndo: boolean;
 }
 
 export interface SearchResult {
   items: SessionDto[];
   totalCount: number;
 }
+
+export interface TransferPreview {
+  filePath: string;
+  kind: string;
+  totalRecords: number;
+  earliestStartTime?: string | null;
+  latestStartTime?: string | null;
+  nonConflictCount: number;
+  conflictCount: number;
+  subjectDefinitionCount: number;
+  subjectKeywordRuleCount: number;
+  theme?: string | null;
+  themeAccentColor?: string | null;
+  idleTimeoutMinutes?: number | null;
+  manualIdleShortcutText?: string | null;
+  subjectDeleteBehavior?: string | null;
+}
+
+export interface TransferExportResult {
+  path: string;
+  kind: string;
+}
+
 
 const responseCache = new Map<string, { value: unknown; expiresAt: number }>();
 const pendingRequests = new Map<string, Promise<unknown>>();
@@ -125,7 +179,12 @@ async function send<T>(url: string, method: 'POST' | 'DELETE', body?: unknown): 
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
-    throw new Error(`请求失败 ${response.status}：${url}`);
+    let message = `请求失败 ${response.status}：${url}`;
+    try {
+      const errorData = await response.json();
+      if (errorData?.message) message = errorData.message;
+    } catch { /* 错误响应不是 JSON，用默认消息 */ }
+    throw new Error(message);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -151,18 +210,42 @@ export const api = {
     ),
   subjectTree: (date: string) => get<SubjectNodeDto[]>(`/api/subject-tree?date=${date}`),
   settings: () => get<SettingsSnapshot>('/api/settings'),
+  saveAppearance: (theme: string, accent: string) => send<void>('/api/settings/appearance', 'POST', { theme, accent }),
+  saveIdleTimeout: (minutes: number) => send<void>('/api/settings/idle-timeout', 'POST', { minutes }),
+  subjectManagement: (forceRefresh = false) => get<SubjectManagementSnapshot>('/api/subject-management', 0, forceRefresh),
+  subjectCommand: (command: string, args: Record<string, unknown> = {}) => send<{ success: boolean; message?: string; data?: unknown }>('/api/subject-management/command', 'POST', { command, args }),
   searchVersion: (forceRefresh = false) =>
     get<{ version: string }>('/api/search-version', 0, forceRefresh),
-  search: (q: string, skip = 0, take = 50, forceRefresh = false) =>
+  search: (q: string, skip = 0, take = 50, forceRefresh = false, options?: { date?: string; allHistory?: boolean; mode?: string; subject?: string | null }) =>
     get<SearchResult>(
-      `/api/search?q=${encodeURIComponent(q)}&skip=${skip}&take=${take}`,
+      `/api/search?${new URLSearchParams({ q, skip: String(skip), take: String(take), ...(options?.date ? { date: options.date } : {}), ...(options?.allHistory ? { allHistory: 'true' } : {}), ...(options?.mode ? { mode: options.mode } : {}), ...(options?.subject ? { subject: options.subject } : {}) })}`,
       15_000,
       forceRefresh
     ),
   active: (subject?: string | null, forceRefresh = false) =>
     get<SessionDto | null>(`/api/active?${new URLSearchParams(subject ? { subject } : {})}`, 0, forceRefresh),
+  agentStatus: (forceRefresh = false) => get<AgentStatus>('/api/agent/status', 2_000, forceRefresh),
+  startAgent: () => send<void>('/api/agent/start', 'POST'),
+  restartAgent: () => send<void>('/api/agent/restart', 'POST'),
+  enterManualIdle: () => send<void>('/api/agent/idle', 'POST'),
+  exitAgent: () => send<void>('/api/agent/exit', 'POST'),
+  sessionCommand: (command: string, args: Record<string, unknown> = {}) => send<void>('/api/session/command', 'POST', { command, args }),
+  bulkDeleteSessions: (sessions: SessionDto[]) => send<{ deleted: number }>('/api/session/command', 'POST', { command: 'session-bulk-delete', args: { sessions } }),
   webPreferences: () => get<WebPreferences>('/api/web-preferences', 60_000),
   saveOverviewRange: (from: string, to: string) =>
     send<WebPreferences>('/api/web-preferences/range', 'POST', { from, to }),
   clearOverviewRange: () => send<void>('/api/web-preferences/range', 'DELETE'),
+  transferExport: (kind: 'usage' | 'settings' | 'full') => send<TransferExportResult>('/api/transfer/export', 'POST', { kind }),
+  transferUpload: async (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    const response = await fetch('/api/transfer/upload', { method: 'POST', body: form });
+    if (!response.ok) throw new Error(`上传失败 ${response.status}`);
+    return (await response.json()) as { path: string; fileName: string; length: number };
+  },
+  transferPreview: (path: string, kind?: string) => send<TransferPreview>('/api/transfer/preview', 'POST', { path, kind }),
+  transferPreviewSessions: (path: string) => send<SessionDto[]>('/api/transfer/preview-sessions', 'POST', { path }),
+  transferImport: (path: string, dataMode: string, conflictStrategy: string, settingsMode: string) =>
+    send<TransferPreview | { importedCount: number; settingsChangedCount: number }>('/api/transfer/import', 'POST', { path, dataMode, conflictStrategy, settingsMode }),
+  transferDownloadUrl: (path: string) => `/api/transfer/download?path=${encodeURIComponent(path)}`,
 };

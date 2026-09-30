@@ -35,6 +35,7 @@ export interface DistributionTheme {
 }
 
 interface PreparedSession {
+  id: string;
   processName: string;
   windowTitle: string;
   subject: string | null;
@@ -154,7 +155,6 @@ export default function TimeDistribution({
   const inertiaRef = useRef({ x: 0, y: 0, frame: null as number | null });
   const wheelRef = useRef({ deltaX: 0, deltaY: 0, zoomDelta: 0, mouseX: 0, frame: null as number | null });
   const zoomingRef = useRef(false);
-  const hoverRef = useRef<{ row: number; segment: Segment } | null>(null);
   const cacheRef = useRef<{
     canvas: HTMLCanvasElement;
     zoom: number;
@@ -182,6 +182,7 @@ export default function TimeDistribution({
   const prepared = useMemo<PreparedSession[]>(
     () =>
       sessions.map((item) => ({
+        id: item.id,
         processName: item.processName,
         windowTitle: item.windowTitle,
         subject: item.manualSubject ?? null,
@@ -509,20 +510,6 @@ export default function TimeDistribution({
       }
     }
 
-    // 悬停高亮单独叠加，不触碰缓存
-    const hover = hoverRef.current;
-    if (hover) {
-      const screenY = hover.row * ROW_HEIGHT - view.offsetY;
-      const barHeight = Math.max(8, Math.min(ROW_HEIGHT - 10, 34));
-      const barTop = screenY + (ROW_HEIGHT - barHeight) / 2;
-      const worldX = minuteToWorldX(hover.segment.startMin, baseWidth);
-      const screenX = (worldX - view.offsetX) * view.zoom;
-      const screenWidth = (minuteToWorldX(hover.segment.endMin, baseWidth) - worldX) * view.zoom;
-      fillGradientBar(ctx, screenX + 0.5, barTop, Math.max(2, screenWidth - 1), barHeight, theme.accent, theme.accentSoft);
-      ctx.strokeStyle = theme.textPrimary;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
     ctx.restore();
 
     // ── 表头 ──
@@ -773,26 +760,15 @@ export default function TimeDistribution({
     }
 
     if (mouseX < DATE_COLUMN_WIDTH || mouseY < HEADER_HEIGHT) {
-      if (hoverRef.current) {
-        hoverRef.current = null;
-        setTooltip(null);
-        scheduleRender();
-      }
+      setTooltip(null);
       return;
     }
 
     const hit = hitTest(mouseX, mouseY);
-    const previous = hoverRef.current;
     if (!hit) {
-      if (previous) {
-        hoverRef.current = null;
-        setTooltip(null);
-        scheduleRender();
-      }
+      setTooltip(null);
       return;
     }
-
-    hoverRef.current = hit;
     const start = new Date(
       getDayStart(orderedDates[hit.row]).getTime() + hit.segment.startMin * 60000
     );
@@ -808,7 +784,6 @@ export default function TimeDistribution({
       range: `${formatClock(start)} – ${formatClock(end)}`,
       duration: formatDurationShort((hit.segment.endMin - hit.segment.startMin) * 60),
     });
-    scheduleRender();
   };
 
   const endDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -816,6 +791,14 @@ export default function TimeDistribution({
     draggingRef.current = false;
     setDragging(false);
     canvasRef.current?.releasePointerCapture(event.pointerId);
+
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const mouseX = rect ? event.clientX - rect.left : pointerRef.current.lastX;
+    const mouseY = rect ? event.clientY - rect.top : pointerRef.current.lastY;
+    const moved = Math.hypot(mouseX - pointerRef.current.x, mouseY - pointerRef.current.y) > 4;
+    if (!moved && Math.abs(inertiaRef.current.x) < 0.02 && Math.abs(inertiaRef.current.y) < 0.02) {
+      return;
+    }
 
     if (Math.abs(inertiaRef.current.x) < 0.02 && Math.abs(inertiaRef.current.y) < 0.02) return;
     const animateInertia = () => {
@@ -978,11 +961,7 @@ export default function TimeDistribution({
           onPointerMove={handlePointerMove}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
-          onPointerLeave={() => {
-            hoverRef.current = null;
-            setTooltip(null);
-            scheduleRender();
-          }}
+          onPointerLeave={() => setTooltip(null)}
         />
         {tooltip && (
           <div

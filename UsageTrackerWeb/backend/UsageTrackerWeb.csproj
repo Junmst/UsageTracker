@@ -8,10 +8,12 @@
     <SelfContained>true</SelfContained>
     <PublishSingleFile>false</PublishSingleFile>
     <PublishTrimmed>false</PublishTrimmed>
-    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- WinForms 不支持完整裁剪；保留全部框架程序集确保兼容性 -->
     <OutputType>WinExe</OutputType>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <AssemblyName>时迹Web</AssemblyName>
     <RootNamespace>UsageTrackerWeb</RootNamespace>
     <Product>时迹Web</Product>
@@ -20,28 +22,52 @@
     <Version>3.3.0</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
-    <!-- 前端由 vite 构建到 web/dist，再同步到 wwwroot -->
+    <!-- 前端构建直接生成 wwwroot，dotnet build/publish 会先执行 npm ci 和 npm run build。 -->
     <EnableDefaultContentItems>true</EnableDefaultContentItems>
+    <EnableFrontendBuild Condition="'$(SkipFrontendBuild)' != 'true'">true</EnableFrontendBuild>
   </PropertyGroup>
+
+  <!-- 发布后删除 WPF 冗余程序集（WebView2 携带，但 Web 只用 WinForms 宿主） -->
+  <!-- 注意：WindowsBase.dll / PresentationCore.dll / wpfgfx_cor3.dll / vcruntime140_cor3.dll 是
+       Native 项目 UIA（UIAutomationClient）的运行时依赖，必须保留，否则 AutomationElement.FromHandle
+       会抛 FileNotFoundException，浏览器标签页标题读不出来退化成 Win32 标题（如 LEARNING）。 -->
+  <Target Name="RemoveWpfAssemblies" AfterTargets="Publish">
+    <ItemGroup>
+      <WpfFiles Include="$(PublishDir)\PresentationFramework.dll" />
+      <WpfFiles Include="$(PublishDir)\PresentationFramework.Aero.dll" />
+      <WpfFiles Include="$(PublishDir)\PresentationFramework.Luna.dll" />
+      <WpfFiles Include="$(PublishDir)\PresentationUI.dll" />
+      <WpfFiles Include="$(PublishDir)\ReachFramework.dll" />
+      <WpfFiles Include="$(PublishDir)\Microsoft.Web.WebView2.Wpf.dll" />
+      <WpfFiles Include="$(PublishDir)\System.Windows.Controls.Ribbon.dll" />
+      <WpfFiles Include="$(PublishDir)\System.Windows.Input.Manipulations.dll" />
+      <WpfFiles Include="$(PublishDir)\System.Windows.Presentation.dll" />
+      <WpfFiles Include="$(PublishDir)\zh-Hans\PresentationFramework*.resources.dll" />
+      <WpfFiles Include="$(PublishDir)\zh-Hans\PresentationUI.resources.dll" />
+      <WpfFiles Include="$(PublishDir)\zh-Hans\ReachFramework.resources.dll" />
+    </ItemGroup>
+    <Delete Files="@(WpfFiles)" />
+    <Message Text="已删除 WPF 冗余程序集: @(WpfFiles->Count()) 个" Importance="high" />
+  </Target>
 
   <!-- 本地 DLL 引用，与桌面版共用同一套 SQLite 驱动 -->
   <ItemGroup>
     <Reference Include="Microsoft.Data.Sqlite">
-      <HintPath>..\..\UsageTrackerNativeV2\lib\Microsoft.Data.Sqlite.dll</HintPath>
+      <HintPath>..\..\UsageTrackerNative\lib\Microsoft.Data.Sqlite.dll</HintPath>
     </Reference>
     <Reference Include="SQLitePCLRaw.batteries_v2">
-      <HintPath>..\..\UsageTrackerNativeV2\lib\SQLitePCLRaw.batteries_v2.dll</HintPath>
+      <HintPath>..\..\UsageTrackerNative\lib\SQLitePCLRaw.batteries_v2.dll</HintPath>
     </Reference>
     <Reference Include="SQLitePCLRaw.core">
-      <HintPath>..\..\UsageTrackerNativeV2\lib\SQLitePCLRaw.core.dll</HintPath>
+      <HintPath>..\..\UsageTrackerNative\lib\SQLitePCLRaw.core.dll</HintPath>
     </Reference>
     <Reference Include="SQLitePCLRaw.provider.e_sqlite3">
-      <HintPath>..\..\UsageTrackerNativeV2\lib\SQLitePCLRaw.provider.e_sqlite3.dll</HintPath>
+      <HintPath>..\..\UsageTrackerNative\lib\SQLitePCLRaw.provider.e_sqlite3.dll</HintPath>
     </Reference>
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\..\UsageTrackerNativeV2\lib\native\win-x64\e_sqlite3.dll">
+    <Content Include="..\..\UsageTrackerNative\lib\native\win-x64\e_sqlite3.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <Link>e_sqlite3.dll</Link>
@@ -52,11 +78,31 @@
     </Content>
   </ItemGroup>
 
-  <!-- 复用桌面版的纯逻辑：凌晨 4 点日界线 + 时长裁剪，保证统计口径一致 -->
+  <!-- 复用 Native 的统计与分类纯逻辑，保证 Web/Native 口径一致。 -->
   <ItemGroup>
-    <Compile Include="..\..\UsageTrackerNativeV2\src\UsageTrackerNative\UsageTimeRange.cs">
+    <Compile Include="..\..\UsageTrackerNative\src\UsageTrackerNative\UsageTimeRange.cs">
       <Link>Shared\UsageTimeRange.cs</Link>
     </Compile>
+    <Compile Include="..\..\UsageTrackerNative\src\UsageTrackerNative\ClassificationModels.cs">
+      <Link>Shared\ClassificationModels.cs</Link>
+    </Compile>
+    <Compile Include="..\..\UsageTrackerNative\src\UsageTrackerNative\SearchExpressionMatcher.cs">
+      <Link>Shared\SearchExpressionMatcher.cs</Link>
+    </Compile>
+    <Compile Include="..\..\UsageTrackerNative\src\UsageTrackerNative\ClassificationResolver.cs">
+      <Link>Shared\ClassificationResolver.cs</Link>
+    </Compile>
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+
+  <Target Name="BuildFrontendAssets" BeforeTargets="Build;Publish" Condition="'$(EnableFrontendBuild)' == 'true' And Exists('$(MSBuildProjectDirectory)\..\web\package-lock.json')">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\web" Command="npm ci --ignore-scripts --no-audit --no-fund &amp;&amp; npm run build"
+          Condition="!Exists('$(MSBuildProjectDirectory)\..\web\node_modules\typescript\bin\tsc')" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\web" Command="npm run build"
+          Condition="Exists('$(MSBuildProjectDirectory)\..\web\node_modules\typescript\bin\tsc')" />
+  </Target>
 
 </Project>

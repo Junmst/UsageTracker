@@ -113,8 +113,7 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
   const displayedOverview = overview ?? fallbackOverview;
   const isRangeMode = overviewRange !== null;
   const displayDaily = overviewRange?.daily ?? daily;
-  const displayTop = overviewRange?.ranking ?? top;
-  const topProcess = useMemo(() => displayTop[0], [displayTop]);
+  const topProcess = useMemo(() => top[0], [top]);
   const todayKey = displayedOverview.date;
 
   const openCalendarModal = () => {
@@ -128,7 +127,8 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
   };
 
   const openRangeModal = () => {
-    const from = overviewRange?.from ?? overview?.earliestDate ?? todayKey;
+    // 起始日期默认用当前已生效的区间起点，否则默认当天（不再取最早记录日期）。
+    const from = overviewRange?.from ?? todayKey;
     const to = overviewRange?.to ?? todayKey;
     setRangeFrom(from);
     setRangeTo(to);
@@ -214,7 +214,7 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
           <div className="overview-date-status-row">
             <div className={`overview-live-status${isRangeMode ? ' is-active range-status' : active ? ' is-active' : ''}`}>
               <span className="status-pulse" />
-              {isRangeMode ? '正在查看自定义区间' : active ? `正在使用 · ${activeElapsed}` : '当前无活动会话'}
+              {active ? `正在使用 · ${activeElapsed}` : '当前无活动会话'}
             </div>
           </div>
           <div className="overview-action-row overview-category-row">
@@ -225,15 +225,15 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
 
       <section className="overview-hero panel">
         <div className="overview-hero-copy">
-          <span className="eyebrow">{isRangeMode ? 'CUSTOM RANGE' : "TODAY'S RHYTHM"}</span>
-          <h3>{isRangeMode ? '区间数据已更新' : active ? '专注正在继续' : '今天的记录已准备好'}</h3>
+          <span className="eyebrow">TODAY'S RHYTHM</span>
+          <h3>{active ? '专注正在继续' : '今天的记录已准备好'}</h3>
           <p title={activeTitle}>
-            {isRangeMode ? `${overviewRange.from} 至 ${overviewRange.to} · ${displaySessionCount.toLocaleString()} 条会话` : active ? activeTitle : `已累计记录 ${displayedOverview.sessionCount.toLocaleString()} 条使用会话`}
+            {active ? activeTitle : `已累计记录 ${displayedOverview.sessionCount.toLocaleString()} 条使用会话`}
           </p>
         </div>
         <div className="overview-hero-focus">
-          <span>{isRangeMode ? '区间总使用' : '今日使用'}</span>
-          <strong>{formatHoursMinutes(isRangeMode ? displayTotalSeconds : displayedOverview.todaySeconds)}</strong>
+          <span>今日使用</span>
+          <strong>{formatHoursMinutes(displayedOverview.todaySeconds)}</strong>
           <small>{topProcess ? `最常使用 · ${topProcess.key}` : '等待更多活动数据'}</small>
         </div>
         <div className="overview-hero-orbit" aria-hidden="true">
@@ -249,13 +249,13 @@ export default function OverviewPage({ date, theme, overviewRange, onOverviewRan
           <div className="chart-heading">
             <div>
               <span className="eyebrow">{isRangeMode ? 'SELECTED RANGE' : 'LAST 30 DAYS'}</span>
-              <h3>{isRangeMode ? '区间每日使用节奏' : '每日使用节奏'}</h3>
+              <h3>每日使用节奏</h3>
             </div>
             <span className="chart-heading-note">小时</span>
           </div>
           <TrendChart data={displayDaily} theme={theme.colors} />
         </section>
-        <RankingChart data={displayTop} title={isRangeMode ? '区间应用排行' : '今日应用排行'} theme={theme.colors} />
+        <RankingChart data={top} title="今日应用排行" theme={theme.colors} />
       </div>
 
       <div className="card-grid overview-metrics">

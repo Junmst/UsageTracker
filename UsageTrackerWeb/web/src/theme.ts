@@ -10,6 +10,8 @@ export interface ThemeColors {
   textPrimary: string;
   textSecondary: string;
   accent: string;
+  accentContrast: string;
+  accentStrong: string;
   accentSoft: string;
   categoryCard: string;
   isDark: boolean;
@@ -69,6 +71,18 @@ function alpha(hex: string, opacity: number): string {
   return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 }
 
+function getAccentContrast(hex: string): string {
+  const { r, g, b } = parseRgb(hex);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.62 ? '#2C2F3A' : '#FFFFFF';
+}
+
+function getAccentStrong(hex: string): string {
+  const { r, g, b } = parseRgb(hex);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.62 ? mix(hex, '#000000', 0.34) : hex;
+}
+
 export function buildTheme(mode: ThemeMode, accent: string): ThemeColors {
   const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   if (isDark) {
@@ -81,6 +95,8 @@ export function buildTheme(mode: ThemeMode, accent: string): ThemeColors {
       textPrimary: '#FFFFFF',
       textSecondary: '#C7C7C7',
       accent,
+      accentContrast: getAccentContrast(accent),
+      accentStrong: getAccentStrong(accent),
       accentSoft: alpha(accent, 0.24),
       categoryCard: 'rgba(0, 0, 0, 0.86)',
     };
@@ -97,6 +113,8 @@ export function buildTheme(mode: ThemeMode, accent: string): ThemeColors {
     textPrimary: '#2C2F3A',
     textSecondary: '#6B6F7E',
     accent,
+    accentContrast: getAccentContrast(accent),
+    accentStrong: getAccentStrong(accent),
     accentSoft: mix(accent, '#FFFFFF', 0.72),
     categoryCard: alpha(mix(accent, '#FFFFFF', 0.88), 0.42),
   };
@@ -179,8 +197,12 @@ export function useTheme(serverAccent?: string | null): ThemeController {
     root.style.setProperty('--text-primary', colors.textPrimary);
     root.style.setProperty('--text-secondary', colors.textSecondary);
     root.style.setProperty('--accent', colors.accent);
+    root.style.setProperty('--accent-contrast', colors.accentContrast);
+    root.style.setProperty('--accent-strong', colors.accentStrong);
     root.style.setProperty('--accent-soft', colors.accentSoft);
     root.style.setProperty('--category-card', colors.categoryCard);
+    root.style.setProperty('--panel-opacity', String(panelOpacity));
+    root.dataset.panelTransparent = panelOpacity === 0 ? 'true' : 'false';
     root.style.setProperty('--radius', '16px');
     root.style.setProperty('--radius-lg', '24px');
     root.style.setProperty(

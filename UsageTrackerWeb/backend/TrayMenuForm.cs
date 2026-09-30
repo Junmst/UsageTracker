@@ -14,8 +14,8 @@ internal sealed class TrayMenuForm : Form
     private static readonly Font TitleFont = new("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
     private static readonly Font ActionFont = new("Microsoft YaHei UI", 10F, FontStyle.Bold);
     private static readonly Font IconFont = new("Segoe UI Symbol", 10.5F, FontStyle.Bold);
-    private static readonly string[] Glyphs = ["⌂", "◷", "▣", "—", "×"];
-    private static readonly string[] Labels = ["打开启动器", "打开网页看板", "打开时迹", "隐藏时迹", "退出全部程序"];
+    private static readonly string[] Glyphs = ["⌂", "◷", "×"];
+    private static readonly string[] Labels = ["打开启动器", "打开网页看板", "退出网页程序"];
 
     private readonly System.Windows.Forms.Timer _closeTimer = new();
     private readonly System.Windows.Forms.Timer _animationTimer = new();
@@ -32,11 +32,9 @@ internal sealed class TrayMenuForm : Form
     public TrayMenuForm(
         Action openLauncher,
         Action openBrowser,
-        Action showNative,
-        Action hideNative,
         Action exitAll)
     {
-        _actions = [openLauncher, openBrowser, showNative, hideNative, exitAll];
+        _actions = [openLauncher, openBrowser, exitAll];
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
@@ -45,7 +43,7 @@ internal sealed class TrayMenuForm : Form
         AutoSize = false;
         DoubleBuffered = true;
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
-        Size = new Size(264, 352);
+        Size = new Size(264, 240);
         BackColor = MenuBackground;
         SetRoundedRegion(12);
         _closeTimer.Interval = 140;

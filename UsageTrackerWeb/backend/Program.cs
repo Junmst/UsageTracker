@@ -6,7 +6,7 @@ using System.Windows.Forms;
 using UsageTrackerNative;
 using UsageTrackerWeb;
 
-using var singleInstanceMutex = new Mutex(true, "Shiji.WebLauncher.SingleInstance", out var isFirstInstance);
+using var singleInstanceMutex = new Mutex(true, "Shiji.WebLauncher.WebView2Pilot.SingleInstance", out var isFirstInstance);
 if (!isFirstInstance)
 {
     return;
@@ -23,12 +23,16 @@ for (var i = 0; i < args.Length - 1; i++)
 
 var dataDirectory = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-    "UsageTrackerNative");
-var store = new ReadOnlyStore(dataDirectory);
+    "UsageTrackerNative_v2");
 var settingsReader = new SettingsReader(dataDirectory);
+var store = new ReadOnlyStore(dataDirectory, settingsReader);
 var webPreferences = new WebPreferencesStore(dataDirectory);
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
 builder.Logging.ClearProviders();
 builder.WebHost.ConfigureKestrel(options =>
 {
@@ -38,7 +42,17 @@ builder.WebHost.ConfigureKestrel(options =>
 var app = builder.Build();
 
 app.UseDefaultFiles();
-app.UseStaticFiles();
+// index.html 禁用缓存：前端重发布后 hash 文件名变化，避免 WebView2 用缓存旧页面加载已删除的旧 bundle
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        if (ctx.File.Name.Equals("index.html", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+        }
+    }
+});
 
 static IResult Json(object? payload) => Results.Json(payload, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
 
@@ -109,6 +123,32 @@ object? GetCached(string key, TimeSpan ttl, Func<object> factory)
         var payload = factory();
         cache[key] = (DateTime.Now.Add(ttl), payload);
         return payload;
+    }
+}
+
+async Task<object?> GetCachedAsync(string key, TimeSpan ttl, Func<Task<object>> factory)
+{
+    lock (cacheLock)
+    {
+        if (cache.TryGetValue(key, out var entry) && entry.Expiry > DateTime.Now)
+        {
+            return entry.Payload;
+        }
+    }
+
+    var payload = await factory();
+    lock (cacheLock)
+    {
+        cache[key] = (DateTime.Now.Add(ttl), payload);
+    }
+    return payload;
+}
+
+void InvalidateWebCaches()
+{
+    lock (cacheLock)
+    {
+        cache.Clear();
     }
 }
 
@@ -199,19 +239,17 @@ app.MapGet("/api/range-summary", (string? from, string? to, string? subject) =>
     {
         var start = UsageTimeRange.GetDayStart(startDate);
         var end = UsageTimeRange.GetDayEnd(endDate);
-        var series = store.GetDailySeries(startDate, endDate, filter);
-        var sessions = store.GetSessionsIntersecting(start, end, filter);
-        var ranking = store.GetProcessStats(start, end, filter).Take(10).ToList();
+        var summary = store.GetRangeSummary(start, end, filter);
         return new
         {
             from = startDate.ToString("yyyy-MM-dd"),
             to = endDate.ToString("yyyy-MM-dd"),
-            seconds = store.GetSecondsInRange(start, end, filter),
-            trackedDays = series.Count(item => item.Seconds > 0),
-            sessionCount = sessions.Count,
-            processCount = store.GetProcessStats(start, end, filter).Count,
-            daily = series,
-            ranking
+            seconds = summary.Seconds,
+            trackedDays = summary.TrackedDays,
+            sessionCount = summary.SessionCount,
+            processCount = summary.ProcessCount,
+            daily = summary.Daily,
+            ranking = summary.Ranking
         };
     });
 
@@ -289,7 +327,6 @@ app.MapGet("/api/subject-tree", (string? date) =>
             .Where(s => !string.IsNullOrWhiteSpace(s.Key) && pathMap.ContainsKey(s.Key))
             .Select(s => (Path: pathMap[s.Key], Seconds: s.Seconds, Count: s.SessionCount))
             .ToList();
-
         var majors = new List<SubjectNodeDto>();
         foreach (var majorGroup in items.GroupBy(x => x.Path.Major).OrderByDescending(g => g.Sum(i => i.Seconds)))
         {
@@ -319,7 +356,7 @@ app.MapGet("/api/subject-tree", (string? date) =>
                 parents));
         }
 
-        return (object)majors;
+        return (object)majors.OrderByDescending(x => x.Seconds).ToList();
     });
 
     return Json(payload!);
@@ -337,11 +374,150 @@ app.MapGet("/api/settings", () =>
             themeAccentRecentColors = snapshot.ThemeAccentRecentColors ?? new List<string>(),
             themeAccentSlots = snapshot.ThemeAccentSlots ?? new List<string>(),
             subjectCount = snapshot.SubjectDefinitions?.Count ?? 0,
-            subjectDefinitions = snapshot.SubjectDefinitions ?? new List<SubjectDefinitionDto>()
+            subjectDefinitions = snapshot.SubjectDefinitions ?? new List<SubjectDefinitionDto>(),
+            idleTimeoutMinutes = snapshot.IdleTimeoutMinutes
         };
     });
 
     return Json(payload!);
+});
+
+var transferDirectory = Path.Combine(dataDirectory, "WebTransfers");
+Directory.CreateDirectory(transferDirectory);
+bool IsTransferPath(string path)
+{
+    try
+    {
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetFullPath(transferDirectory) + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+app.MapPost("/api/transfer/export", async (TransferExportRequest request, CancellationToken cancellationToken) =>
+{
+    var kind = string.IsNullOrWhiteSpace(request.Kind) ? "full" : request.Kind.Trim().ToLowerInvariant();
+    var extension = kind == "settings" ? ".json" : ".zip";
+    var filePath = Path.Combine(transferDirectory, $"{kind}-{DateTime.Now:yyyyMMdd-HHmmssfff}{extension}");
+    var response = await NativeControlClient.SendWebCommandAsync("transfer-export", new { path = filePath, kind }, cancellationToken);
+    return response?.Ok == true
+        ? Json(new { path = filePath, kind })
+        : Results.Problem(response?.Error ?? "导出失败", statusCode: 503);
+});
+
+app.MapPost("/api/transfer/upload", async (HttpRequest request, CancellationToken cancellationToken) =>
+{
+    if (!request.HasFormContentType) return Results.BadRequest(new { error = "请上传文件" });
+    var form = await request.ReadFormAsync(cancellationToken);
+    var file = form.Files.GetFile("file");
+    if (file is null || file.Length == 0) return Results.BadRequest(new { error = "上传文件为空" });
+    if (file.Length > 512L * 1024 * 1024) return Results.BadRequest(new { error = "文件超过 512 MB 限制" });
+    var safeName = Path.GetFileName(file.FileName);
+    var filePath = Path.Combine(transferDirectory, $"{Guid.NewGuid():N}-{safeName}");
+    await using (var output = File.Create(filePath)) await file.CopyToAsync(output, cancellationToken);
+    return Json(new { path = filePath, fileName = safeName, length = file.Length });
+});
+
+app.MapGet("/api/transfer/download", (string path) =>
+{
+    if (!IsTransferPath(path) || !File.Exists(path)) return Results.NotFound();
+    var contentType = Path.GetExtension(path).Equals(".json", StringComparison.OrdinalIgnoreCase)
+        ? "application/json"
+        : "application/zip";
+    return Results.File(path, contentType, Path.GetFileName(path), enableRangeProcessing: true);
+});
+
+app.MapPost("/api/transfer/preview", async (TransferPreviewRequest request, CancellationToken cancellationToken) =>
+{ 
+    if (string.IsNullOrWhiteSpace(request.Path) || !IsTransferPath(request.Path))
+        return Results.BadRequest(new { error = "导入文件路径无效" });
+    var response = await NativeControlClient.SendWebCommandAsync("transfer-preview", new { path = request.Path, kind = request.Kind }, cancellationToken);
+    return response?.Ok == true && response.Data.HasValue
+        ? Results.Json(response.Data.Value)
+        : Results.Problem(response?.Error ?? "无法预览导入文件", statusCode: 503);
+});
+
+app.MapPost("/api/transfer/preview-sessions", async (TransferPreviewRequest request, CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Path) || !IsTransferPath(request.Path))
+        return Results.BadRequest(new { error = "导入文件路径无效" });
+    var response = await NativeControlClient.SendWebCommandAsync("transfer-preview-sessions", new { path = request.Path, search = string.Empty, mode = "All" }, cancellationToken);
+    return response?.Ok == true && response.Data.HasValue
+        ? Results.Json(response.Data.Value)
+        : Results.Problem(response?.Error ?? "无法读取预览记录", statusCode: 503);
+});
+
+app.MapPost("/api/transfer/import", async (TransferImportRequest request, CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Path) || !IsTransferPath(request.Path))
+        return Results.BadRequest(new { error = "导入文件路径无效" });
+    var response = await NativeControlClient.SendWebCommandAsync("transfer-import", request, cancellationToken);
+    if (response?.Ok != true) return Results.Problem(response?.Error ?? "导入失败", statusCode: 503);
+    InvalidateWebCaches();
+    return response.Data.HasValue ? Results.Json(response.Data.Value) : Results.NoContent();
+});
+
+app.MapPost("/api/settings/appearance", async (JsonElement body, CancellationToken cancellationToken) =>
+{
+    var theme = body.TryGetProperty("theme", out var themeValue) ? themeValue.GetString() : null;
+    var accent = body.TryGetProperty("accent", out var accentValue) ? accentValue.GetString() : null;
+    var response = await NativeControlClient.SendWebCommandAsync("settings-set-appearance", new { theme, accent }, cancellationToken);
+    if (response?.Ok != true) return Results.Problem(response?.Error ?? "设置保存失败", statusCode: 503);
+    InvalidateWebCaches();
+    return Results.NoContent();
+});
+
+app.MapPost("/api/settings/idle-timeout", async (JsonElement body, CancellationToken cancellationToken) =>
+{
+    if (!body.TryGetProperty("minutes", out var minutesValue) || minutesValue.ValueKind != JsonValueKind.Number)
+        return Results.BadRequest(new { error = "空闲判定时长无效" });
+    var minutes = minutesValue.GetInt32();
+    if (minutes < 1 || minutes > 1440)
+        return Results.BadRequest(new { error = "空闲判定时长需在 1-1440 分钟之间" });
+    var response = await NativeControlClient.SendWebCommandAsync("settings-set-idle-timeout", new { minutes = minutes.ToString() }, cancellationToken);
+    if (response?.Ok != true) return Results.Problem(response?.Error ?? "设置保存失败", statusCode: 503);
+    InvalidateWebCaches();
+    return Results.NoContent();
+});
+
+app.MapGet("/api/subject-management", async (CancellationToken cancellationToken) =>
+{
+    var payload = await GetCachedAsync("subject-management", TimeSpan.FromSeconds(15), async () =>
+    {
+        var response = await NativeControlClient.SendWebCommandAsync("subject-snapshot", cancellationToken: cancellationToken);
+        return response?.Ok == true && response.Data.HasValue
+            ? (object)response.Data.Value
+            : throw new InvalidOperationException(response?.Error ?? "桌面版未响应");
+    });
+    return Json(payload!);
+});
+
+app.MapPost("/api/subject-management/command", async (JsonElement body, CancellationToken cancellationToken) =>
+{
+    if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("command", out var commandElement))
+    {
+        return Results.BadRequest(new { error = "缺少管理命令" });
+    }
+
+    var command = commandElement.GetString();
+    if (string.IsNullOrWhiteSpace(command))
+    {
+        return Results.BadRequest(new { error = "管理命令不能为空" });
+    }
+
+    var args = body.TryGetProperty("args", out var argsElement) ? argsElement : (JsonElement?)null;
+    var response = await NativeControlClient.SendWebCommandAsync(command, args, cancellationToken);
+    if (response?.Ok != true)
+    {
+        return Results.Problem(response?.Error ?? "桌面版未响应", statusCode: 503);
+    }
+
+    InvalidateWebCaches();
+    return response.Data.HasValue ? Results.Json(response.Data.Value) : Results.NoContent();
 });
 
 app.MapGet("/api/active", (string? subject) =>
@@ -350,6 +526,57 @@ app.MapGet("/api/active", (string? subject) =>
     var filter = CreateSubjectFilter(subject, settingsReader);
     if (filter is not null && active is not null && !filter(active)) active = null;
     return Json(active);
+});
+
+app.MapGet("/api/agent/status", async (CancellationToken cancellationToken) =>
+{
+    var response = await NativeControlClient.GetStatusAsync(cancellationToken);
+    return response?.Status is not null
+        ? Json(response.Status)
+        : Results.Json(new { running = false, tracking = false, isIdle = true, isManualIdle = false, isVideoPlayback = false, error = response?.Error ?? "后台记录程序未响应" }, statusCode: 503);
+});
+
+app.MapPost("/api/agent/start", async (CancellationToken cancellationToken) =>
+{
+    var response = await NativeControlClient.StartAsync(cancellationToken);
+    return response?.Ok == true ? Results.NoContent() : Results.Problem(response?.Error ?? "无法启动后台记录程序", statusCode: 503);
+});
+
+app.MapPost("/api/agent/restart", async (CancellationToken cancellationToken) =>
+{
+    await NativeControlClient.StopAsync(cancellationToken);
+    await Task.Delay(500, cancellationToken);
+    var response = await NativeControlClient.StartAsync(cancellationToken);
+    return response?.Ok == true ? Results.NoContent() : Results.Problem(response?.Error ?? "无法重启后台记录程序", statusCode: 503);
+});
+
+app.MapPost("/api/agent/idle", async (CancellationToken cancellationToken) =>
+{
+    var ok = await NativeControlClient.EnsureStartedAndSendAsync("idle", cancellationToken: cancellationToken);
+    return ok ? Results.NoContent() : Results.Problem("无法让后台记录进入手动空闲状态", statusCode: 503);
+});
+
+app.MapPost("/api/session/command", async (JsonElement body, CancellationToken cancellationToken) =>
+{
+    if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("command", out var commandElement))
+        return Results.BadRequest(new { error = "缺少会话命令" });
+    var command = commandElement.GetString();
+    if (string.IsNullOrWhiteSpace(command)) return Results.BadRequest(new { error = "会话命令不能为空" });
+    var args = body.TryGetProperty("args", out var argsElement) ? argsElement : (JsonElement?)null;
+    var response = await NativeControlClient.SendWebCommandAsync(command, args, cancellationToken);
+    if (response?.Ok != true) return Results.Problem(response?.Error ?? "后台记录程序未响应", statusCode: 503);
+    InvalidateWebCaches();
+    return response.Data.HasValue ? Results.Json(response.Data.Value) : Results.NoContent();
+});
+
+app.MapPost("/api/agent/show", () => Results.Conflict(new { error = "Web-only 模式不提供 WPF 窗口" }));
+app.MapPost("/api/agent/hide", () => Results.NoContent());
+app.MapPost("/api/agent/compact", () => Results.Conflict(new { error = "Web-only 模式不提供悬浮窗口" }));
+
+app.MapPost("/api/agent/exit", async (CancellationToken cancellationToken) =>
+{
+    var ok = await NativeControlClient.StopAsync(cancellationToken);
+    return ok ? Results.NoContent() : Results.Problem("后台记录程序未响应", statusCode: 503);
 });
 
 app.MapGet("/api/web-preferences", () => Json(webPreferences.Load()));
@@ -416,8 +643,15 @@ app.MapGet("/api/browser-presence", () =>
     });
 });
 
-app.MapGet("/api/search", (string? q, int? skip, int? take) =>
-    Json(store.Search(q, skip ?? 0, take ?? 50)));
+app.MapGet("/api/search", (string? q, int? skip, int? take, string? date, bool? allHistory, string? mode, string? subject) =>
+{
+    if (DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var selectedDate))
+    {
+        return Json(store.SearchAdvanced(q, skip ?? 0, take ?? 50, selectedDate, allHistory == true, mode, settingsReader.Load().SubjectDefinitions ?? [], subject));
+    }
+
+    return Json(store.Search(q, skip ?? 0, take ?? 50));
+});
 
 app.MapGet("/api/search-version", () => Json(new { version = store.GetSearchVersion() }));
 
@@ -425,16 +659,32 @@ app.MapFallbackToFile("index.html");
 
 var url = $"http://127.0.0.1:{port}";
 
-Application.SetHighDpiMode(HighDpiMode.SystemAware);
-Application.EnableVisualStyles();
-Application.SetCompatibleTextRenderingDefault(false);
+var startTask = app.StartAsync();
+startTask.GetAwaiter().GetResult();
+_ = WarmWebCacheAsync(url, webPreferences, CancellationToken.None);
 
-var runTask = app.RunAsync();
-_ = WarmWebCacheAsync(url, webPreferences, app.Lifetime.ApplicationStopping);
-using var tray = new TrayForm(app, url, args.Contains("--show"), webPreferences);
-Application.Run(tray);
+var uiThread = new Thread(() =>
+{
+    Application.SetHighDpiMode(HighDpiMode.SystemAware);
+    Application.EnableVisualStyles();
+    Application.SetCompatibleTextRenderingDefault(false);
+    using var tray = new TrayForm(app, url, args.Contains("--show"), webPreferences);
+    // 隐式启动：默认（无参数 / 开机自启）只显示小窗 + 托盘，不弹启动器与网页看板。
+    // --show 显式打开启动器 + 网页看板；--status-window 与默认一致，仅显示小窗。
+    if (!args.Contains("--show"))
+    {
+        tray.BeginInvoke(() => tray.ShowStatusWindowFromStartup());
+    }
+    Application.Run(tray);
+})
+{
+    IsBackground = false,
+};
+uiThread.SetApartmentState(ApartmentState.STA);
+uiThread.Start();
+uiThread.Join();
 
-runTask.GetAwaiter().GetResult();
+app.StopAsync().GetAwaiter().GetResult();
 
 static async Task WarmWebCacheAsync(string baseUrl, WebPreferencesStore preferences, CancellationToken cancellationToken)
 {
@@ -492,6 +742,10 @@ static Dictionary<string, (string Major, string? Parent, string? Child)> BuildSu
         }
 
         map.TryAdd(major.Name, (major.Name, null, null));
+        foreach (var child in major.Children ?? new List<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(child)) map.TryAdd(child, (major.Name, null, child));
+        }
         foreach (var parent in major.Parents ?? new List<SubjectParentDefinitionDto>())
         {
             if (string.IsNullOrWhiteSpace(parent.Name))

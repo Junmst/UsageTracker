@@ -5,9 +5,10 @@ interface Props {
   subjects: SubjectDefinition[];
   value: string | null;
   onChange: (value: string | null) => void;
+  emptyLabel?: string;
 }
 
-export default function SubjectFilterMenu({ subjects, value, onChange }: Props) {
+export default function SubjectFilterMenu({ subjects, value, onChange, emptyLabel = '全部分类' }: Props) {
   const [collapsedMajors, setCollapsedMajors] = useState<Set<string>>(new Set());
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
   const [menuOpen, setMenuOpen] = useState(false);
@@ -78,7 +79,7 @@ export default function SubjectFilterMenu({ subjects, value, onChange }: Props) 
         aria-expanded={menuOpen}
         onClick={() => (menuOpen ? closeMenu() : openMenu())}
       >
-        {value ?? '全部分类'} ▾
+        {value ?? emptyLabel} ▾
       </button>
       {menuMounted && (
         <div className="subject-filter-menu" role="menu">

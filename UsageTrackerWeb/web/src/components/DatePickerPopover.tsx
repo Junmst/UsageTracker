@@ -4,6 +4,8 @@ import { formatDateKey, formatDateLabel, parseDateKey } from '../lib/format';
 interface Props {
   value: string;
   onChange: (value: string) => void;
+  disabled?: boolean;
+  align?: 'left' | 'right';
 }
 
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
@@ -16,7 +18,7 @@ function shiftMonth(date: Date, offset: number): Date {
   return new Date(date.getFullYear(), date.getMonth() + offset, 1);
 }
 
-export default function DatePickerPopover({ value, onChange }: Props) {
+export default function DatePickerPopover({ value, onChange, disabled = false, align = 'left' }: Props) {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(parseDateKey(value)));
@@ -42,10 +44,14 @@ export default function DatePickerPopover({ value, onChange }: Props) {
   };
 
   const openPicker = () => {
+    if (disabled) return;
     cancelClose();
     setVisibleMonth(startOfMonth(parseDateKey(value)));
     setMounted(true);
-    setOpen(true);
+    // 先以收起态挂载并绘制一帧，下一帧再切到展开态，打开时才有与收起一致的过渡动画。
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => setOpen(true));
+    });
   };
 
   useEffect(() => () => {
@@ -97,7 +103,7 @@ export default function DatePickerPopover({ value, onChange }: Props) {
 
   return (
     <div
-      className={`date-picker${mounted ? ' date-picker-mounted' : ''}${open ? ' date-picker-open' : ''}`}
+      className={`date-picker${align === 'right' ? ' date-picker-align-right' : ''}${mounted ? ' date-picker-mounted' : ''}${open ? ' date-picker-open' : ''}`}
       ref={rootRef}
       onPointerEnter={cancelClose}
       onPointerLeave={() => {
@@ -110,6 +116,7 @@ export default function DatePickerPopover({ value, onChange }: Props) {
         type="button"
         ref={triggerRef}
         className="date-picker-trigger"
+        disabled={disabled}
         aria-haspopup="dialog"
         aria-controls="date-picker-dialog"
         aria-expanded={open}

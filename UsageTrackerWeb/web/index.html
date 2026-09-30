@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>时迹</title>
+    <script>
+      /* 首帧前应用已保存主题，避免 React 挂载前显示内置粉彩默认主题导致闪屏 */
+      (function () {
+        try {
+          var root = document.documentElement;
+          var mode = localStorage.getItem('shiji.mode');
+          var dark = mode === 'dark' || ((mode === null || mode === 'system') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var set = function (name, value) { root.style.setProperty(name, value); };
+          var mixCh = function (v, ratio) { return Math.round(v + (255 - v) * ratio); };
+          var hex = (localStorage.getItem('shiji.accent') || '').trim().replace('#', '');
+          if (hex.length === 8) hex = hex.slice(2);
+          if (hex.length === 3) hex = hex.split('').map(function (c) { return c + c; }).join('');
+          var r = 0, g = 0, b = 0;
+          if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+            r = parseInt(hex.slice(0, 2), 16); g = parseInt(hex.slice(2, 4), 16); b = parseInt(hex.slice(4, 6), 16);
+            var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            set('--accent', '#' + hex.toUpperCase());
+            set('--accent-contrast', lum > 0.62 ? '#2C2F3A' : '#FFFFFF');
+            set('--accent-strong', lum > 0.62
+              ? '#' + [r, g, b].map(function (v) { return Math.round(v * 0.66).toString(16).padStart(2, '0'); }).join('').toUpperCase()
+              : '#' + hex.toUpperCase());
+            set('--accent-soft', dark
+              ? 'rgba(' + r + ', ' + g + ', ' + b + ', 0.24)'
+              : 'rgb(' + mixCh(r, 0.72) + ', ' + mixCh(g, 0.72) + ', ' + mixCh(b, 0.72) + ')');
+          } else if (dark) {
+            set('--accent-soft', 'rgba(136, 136, 136, 0.2)');
+          }
+          var op = Number(localStorage.getItem('shiji.panel-opacity'));
+          if (!isFinite(op)) op = 0.82;
+          op = Math.max(0, Math.min(1, op));
+          if (dark) {
+            set('color-scheme', 'dark');
+            set('--window-bg', 'rgba(0, 0, 0, 0)');
+            set('--panel', 'rgba(0, 0, 0, ' + op + ')');
+            set('--panel-alt', 'rgba(0, 0, 0, ' + Math.max(0, op - 0.26) + ')');
+            set('--category-card', 'rgba(0, 0, 0, ' + Math.max(0, op - 0.4) + ')');
+            set('--border', 'rgba(255, 255, 255, 0.2)');
+            set('--text-primary', '#FFFFFF');
+            set('--text-secondary', '#C7C7C7');
+            set('--shadow', '0 8px 24px rgba(0,0,0,0.35)');
+            set('--shadow-lg', '0 18px 50px rgba(0,0,0,0.45)');
+          } else {
+            set('color-scheme', 'light');
+            set('--window-bg', 'rgba(255, 255, 255, 0)');
+            set('--panel', 'rgba(255, 255, 255, ' + op + ')');
+            set('--panel-alt', 'rgba(255, 255, 255, ' + Math.max(0, op - 0.26) + ')');
+            if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
+              set('--category-card', 'rgba(255, 233, 243, 0.42)');
+            } else {
+              var m = mixCh(r, 0.88);
+              set('--category-card', 'rgba(' + m + ', ' + m + ', ' + m + ', ' + Math.max(0, op - 0.4) + ')');
+            }
+            set('--border', 'rgba(' + mixCh(r, 0.55) + ', ' + mixCh(g, 0.55) + ', ' + mixCh(b, 0.55) + ', 0.38)');
+            set('--text-primary', '#2C2F3A');
+            set('--text-secondary', '#6B6F7E');
+          }
+        } catch (e) { /* 主题预加载失败时回退默认样式 */ }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

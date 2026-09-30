@@ -19,6 +19,7 @@ public sealed class TrayForm : Form
     private const string RegistryRunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string StartupValueName = "时迹Web";
     private const int BrowserHotkeyId = 0x5742;
+    private const int ManualIdleHotkeyId = 0x5743;
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
@@ -32,6 +33,10 @@ public sealed class TrayForm : Form
     private uint _hotkeyModifiers;
     private uint _hotkeyKey;
     private bool _hotkeyRegistered;
+    private readonly HotkeyTextBox _manualIdleHotkeyBox = new();
+    private uint _manualIdleHotkeyModifiers;
+    private uint _manualIdleHotkeyKey;
+    private bool _manualIdleHotkeyRegistered;
     private readonly NotifyIcon _notifyIcon = new();
     private readonly System.Windows.Forms.Timer _trayClickTimer = new();
     private TrayMenuForm? _trayMenu;
@@ -40,11 +45,15 @@ public sealed class TrayForm : Form
     private readonly Label _nativeStatusLabel = new();
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly ToggleSwitch _startupSwitch = new();
-    private readonly Button _nativeButton = new();
-    private bool _nativeVisible;
     private DateTime _lastBrowserLaunchAt = DateTime.MinValue;
     private bool _closingForExit;
     private bool _launcherBoundsApplied;
+    /// <summary>是否允许启动器窗口可见。Application.Run(Form) 会自动 Show()，
+    /// 用此标志在启动阶段拦截，实现隐式启动（默认只显示小窗+托盘）。
+    /// --show 参数或用户从托盘菜单"打开启动器"时才置为 true。</summary>
+    private bool _launcherVisible;
+    private DashboardForm? _dashboard;
+    private CompactStatusForm? _statusWindow;
     private int? _ownedNativeProcessId;
 
     private const uint SwpNoMove = 0x0002;
@@ -61,18 +70,35 @@ public sealed class TrayForm : Form
     {
         _host = host;
         _url = url;
-        _preferences = preferences ?? new WebPreferencesStore(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "UsageTrackerNative"));
+        _preferences = preferences ?? throw new ArgumentNullException(nameof(preferences));
         InitializeComponent();
         NativeTheme.Changed += NativeTheme_Changed;
         ApplyNativeTheme();
         LoadHotkey();
         RegisterBrowserHotkey();
+        LoadManualIdleHotkey();
+        RegisterManualIdleHotkey();
         if (showWindow)
         {
+            _launcherVisible = true;
             Show();
+            _ = OpenBrowserAsync();
         }
+        // 无论启动器是否显示，消息循环启动后必定拉起 Native 后台记录程序。
+        // 之前绑在 Shown 事件上，隐式启动时 Shown 不触发会导致 Native 永不启动。
+        BeginInvoke(async () => await StartNativeInBackgroundAsync());
+    }
+
+    /// <summary>Application.Run(this) 会自动调用 Show() 让窗口可见。
+    /// 启动阶段（隐式启动）时 _launcherVisible=false，拦截 Show 避免启动器弹出。
+    /// 注意：不能依赖 IsHandleCreated 判断，因为构造函数里 RegisterHotKey 已创建句柄。</summary>
+    protected override void SetVisibleCore(bool value)
+    {
+        if (value && !_launcherVisible)
+        {
+            value = false;
+        }
+        base.SetVisibleCore(value);
     }
 
     private void InitializeComponent()
@@ -186,38 +212,39 @@ public sealed class TrayForm : Form
         actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         actions.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         actions.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        _nativeButton.Text = "打开时迹";
-        StyleButton(_nativeButton, primary: true);
-        _nativeButton.Margin = new Padding(0, 0, 7, 7);
-        _nativeButton.Click += async (_, _) => await ToggleNativeAsync();
-        actions.Controls.Add(_nativeButton, 0, 0);
         var webButton = new Button { Text = "打开网页看板" };
-        StyleButton(webButton, primary: false);
-        webButton.Margin = new Padding(7, 0, 0, 7);
+        StyleButton(webButton, primary: true);
+        webButton.Margin = new Padding(0, 0, 7, 7);
         webButton.Click += async (_, _) => await OpenBrowserAsync();
-        actions.Controls.Add(webButton, 1, 0);
-        var hideButton = new Button { Text = "隐藏时迹窗口" };
+        actions.Controls.Add(webButton, 0, 0);
+        var statusButton = new Button { Text = "刷新后台状态" };
+        StyleButton(statusButton, primary: false);
+        statusButton.Margin = new Padding(7, 0, 0, 7);
+        statusButton.Click += async (_, _) => await RefreshNativeStatusAsync();
+        actions.Controls.Add(statusButton, 1, 0);
+        var hideButton = new Button { Text = "隐藏启动器" };
         StyleButton(hideButton, primary: false);
         hideButton.Margin = new Padding(0, 7, 7, 0);
-        hideButton.Click += async (_, _) => await SendNativeCommandAsync("hide", "已隐藏时迹窗口");
+        hideButton.Click += (_, _) => Hide();
         actions.Controls.Add(hideButton, 0, 1);
-        var compactButton = new Button { Text = "显示专注小窗" };
-        StyleButton(compactButton, primary: false);
-        compactButton.Margin = new Padding(7, 7, 0, 0);
-        compactButton.Click += async (_, _) => await SendNativeCommandAsync("compact", "已切换到专注小窗");
-        actions.Controls.Add(compactButton, 1, 1);
+        var statusWindowButton = new Button { Text = "打开状态小窗" };
+        StyleButton(statusWindowButton, primary: false);
+        statusWindowButton.Margin = new Padding(7, 7, 0, 0);
+        statusWindowButton.Click += (_, _) => ShowStatusWindow();
+        actions.Controls.Add(statusWindowButton, 1, 1);
         root.Controls.Add(actions, 0, 2);
 
         var info = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             AutoSize = true,
             Padding = new Padding(14, 10, 14, 9),
             BackColor = Panel,
             Margin = new Padding(0, 0, 0, 12),
         };
+        info.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         info.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         info.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         info.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -283,6 +310,39 @@ public sealed class TrayForm : Form
         hotkeyRow.Controls.Add(hotkeyLabel, 0, 0);
         hotkeyRow.Controls.Add(_hotkeyBox, 1, 0);
         info.Controls.Add(hotkeyRow, 0, 3);
+
+        // 手动空闲快捷键自定义槽：默认显示“未设置”，用户按下任意修饰键+字母/数字/F键即注册为全局热键。
+        var manualIdleHotkeyLabel = new Label
+        {
+            Text = "空闲快捷键",
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            MinimumSize = new Size(132, 28),
+            ForeColor = TextSecondary,
+            Font = new Font("Microsoft YaHei UI", 8.5F),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, 2, 8, 0),
+            AutoEllipsis = false,
+        };
+        _manualIdleHotkeyBox.Dock = DockStyle.Left;
+        _manualIdleHotkeyBox.Width = 110;
+        _manualIdleHotkeyBox.Height = 28;
+        _manualIdleHotkeyBox.Margin = new Padding(30, 2, 0, 0);
+        _manualIdleHotkeyBox.Text = FormatManualIdleHotkey(_manualIdleHotkeyModifiers, _manualIdleHotkeyKey);
+        _manualIdleHotkeyBox.HotkeyCaptured += (_, hotkey) => SaveManualIdleHotkey(hotkey.Modifiers, hotkey.Key);
+        var manualIdleHotkeyRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 2,
+            RowCount = 1,
+            AutoSize = true,
+            Margin = new Padding(0, 2, 0, 0),
+        };
+        manualIdleHotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        manualIdleHotkeyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        manualIdleHotkeyRow.Controls.Add(manualIdleHotkeyLabel, 0, 0);
+        manualIdleHotkeyRow.Controls.Add(_manualIdleHotkeyBox, 1, 0);
+        info.Controls.Add(manualIdleHotkeyRow, 0, 4);
         root.Controls.Add(info, 0, 3);
 
         var footer = new TableLayoutPanel
@@ -353,10 +413,6 @@ public sealed class TrayForm : Form
         _timer.Tick += (_, _) => UpdateUptime();
         _timer.Start();
         UpdateUptime();
-        Shown += async (_, _) =>
-        {
-            await StartNativeInBackgroundAsync();
-        };
     }
 
     private void NotifyIcon_MouseClick(object? sender, MouseEventArgs e)
@@ -387,8 +443,6 @@ public sealed class TrayForm : Form
         _trayMenu = new TrayMenuForm(
             ShowLauncher,
             () => _ = OpenBrowserAsync(),
-            () => _ = SendNativeCommandAsync("show", "时迹主窗口已打开"),
-            () => _ = SendNativeCommandAsync("hide", "已隐藏时迹窗口"),
             () => _ = ExitAsync());
         _trayMenu.ShowFromTray();
     }
@@ -577,47 +631,19 @@ public sealed class TrayForm : Form
     private async Task StartNativeInBackgroundAsync()
     {
         _ownedNativeProcessId = FindRunningNativeProcessId();
-        _nativeStatusLabel.Text = "正在启动桌面记录服务…";
-        var ok = await NativeControlClient.EnsureStartedAndSendAsync("hide", processId => _ownedNativeProcessId = processId);
-        _nativeVisible = false;
-        _nativeStatusLabel.Text = ok ? "时迹已在后台运行，正在记录使用时长" : "时迹尚未启动，可点击打开时迹重试";
-        UpdateNativeButton();
-    }
-
-    private async Task ToggleNativeAsync()
-    {
-        var command = _nativeVisible ? "hide" : "show";
-        await SendNativeCommandAsync(command, _nativeVisible ? "已隐藏时迹窗口" : "时迹主窗口已打开");
-    }
-
-    private async Task SendNativeCommandAsync(string command, string successMessage)
-    {
-        _nativeButton.Enabled = false;
-        _nativeStatusLabel.Text = "正在连接时迹…";
-        var ok = await NativeControlClient.EnsureStartedAndSendAsync(command, processId => _ownedNativeProcessId = processId);
-        _nativeButton.Enabled = true;
-        if (!ok)
-        {
-            _nativeStatusLabel.Text = "未能启动时迹，请检查程序文件是否完整";
-            return;
-        }
-
-        _nativeVisible = command is "show" or "compact";
-        _nativeStatusLabel.Text = successMessage;
-        UpdateNativeButton();
+        _nativeStatusLabel.Text = "正在启动后台记录服务…";
+        var response = await NativeControlClient.EnsureStartedAndGetStatusAsync();
+        _nativeStatusLabel.Text = response?.Ok == true
+            ? "后台记录服务正在运行，Web 是唯一用户界面"
+            : "后台记录服务未响应，请检查发布文件";
     }
 
     private async Task RefreshNativeStatusAsync()
     {
-        var running = await NativeControlClient.SendAsync("status");
-        _nativeVisible = false;
-        _nativeStatusLabel.Text = running ? "时迹在后台运行，记录服务正常" : "时迹尚未启动，打开时会自动启动";
-        UpdateNativeButton();
-    }
-
-    private void UpdateNativeButton()
-    {
-        _nativeButton.Text = _nativeVisible ? "隐藏时迹" : "打开时迹";
+        var response = await NativeControlClient.GetStatusAsync();
+        _nativeStatusLabel.Text = response?.Status is { Running: true } status
+            ? status.Tracking ? "后台记录服务正在记录，Web 是唯一用户界面" : "后台记录服务已启动但当前未记录"
+            : "后台记录服务未运行";
     }
 
     protected override void OnShown(EventArgs e)
@@ -633,6 +659,20 @@ public sealed class TrayForm : Form
         SetWindowPos(Handle, IntPtr.Zero, 0, 0, width, height, SwpNoMove | SwpNoZOrder | SwpNoActivate);
     }
 
+    internal void ShowStatusWindowFromStartup()
+    {
+        ShowStatusWindow();
+    }
+
+    private void ShowStatusWindow()
+    {
+        if (_statusWindow is null || _statusWindow.IsDisposed)
+        {
+            _statusWindow = new CompactStatusForm(ShowLauncher);
+        }
+        _statusWindow.ShowStatus();
+    }
+
     private void ShowLauncher()
     {
         if (Visible && WindowState != FormWindowState.Minimized)
@@ -641,6 +681,7 @@ public sealed class TrayForm : Form
             return;
         }
 
+        _launcherVisible = true;
         Show();
         WindowState = FormWindowState.Normal;
         Activate();
@@ -701,11 +742,88 @@ public sealed class TrayForm : Form
         return string.Join(" + ", parts);
     }
 
+    // 手动空闲快捷键：用户未设置时不注册全局热键，输入框显示“未设置”。
+    private void LoadManualIdleHotkey()
+    {
+        var hotkey = _preferences.Load().ManualIdleHotkey;
+        if (hotkey is null || hotkey.Modifiers == 0 || hotkey.Key == 0)
+        {
+            _manualIdleHotkeyModifiers = 0;
+            _manualIdleHotkeyKey = 0;
+        }
+        else
+        {
+            _manualIdleHotkeyModifiers = hotkey.Modifiers;
+            _manualIdleHotkeyKey = hotkey.Key;
+        }
+        _manualIdleHotkeyBox.Text = FormatManualIdleHotkey(_manualIdleHotkeyModifiers, _manualIdleHotkeyKey);
+    }
+
+    private void SaveManualIdleHotkey(uint modifiers, uint key)
+    {
+        if ((modifiers & (ModControl | ModAlt | ModShift | ModWin)) == 0) return;
+        UnregisterManualIdleHotkey();
+        _manualIdleHotkeyModifiers = modifiers;
+        _manualIdleHotkeyKey = key;
+        _preferences.SaveManualIdleHotkey(modifiers, key, FormatManualIdleHotkey(modifiers, key));
+        RegisterManualIdleHotkey();
+        _manualIdleHotkeyBox.Text = FormatManualIdleHotkey(modifiers, key);
+    }
+
+    private void RegisterManualIdleHotkey()
+    {
+        if (_manualIdleHotkeyModifiers == 0 || _manualIdleHotkeyKey == 0) return;
+        _manualIdleHotkeyRegistered = RegisterHotKey(Handle, ManualIdleHotkeyId, _manualIdleHotkeyModifiers, _manualIdleHotkeyKey);
+        if (!_manualIdleHotkeyRegistered)
+        {
+            _manualIdleHotkeyBox.Text = $"{FormatManualIdleHotkey(_manualIdleHotkeyModifiers, _manualIdleHotkeyKey)}（不可用）";
+        }
+    }
+
+    private void UnregisterManualIdleHotkey()
+    {
+        if (!_manualIdleHotkeyRegistered) return;
+        UnregisterHotKey(Handle, ManualIdleHotkeyId);
+        _manualIdleHotkeyRegistered = false;
+    }
+
+    private static string FormatManualIdleHotkey(uint modifiers, uint key)
+    {
+        if (modifiers == 0 || key == 0) return "未设置";
+        return FormatHotkey(modifiers, key);
+    }
+
+    /// <summary>按下手动空闲热键后调用 /api/agent/idle，让 Native 进入手动空闲状态。</summary>
+    private async Task TriggerManualIdleAsync()
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+            using var response = await client.PostAsync($"{_url.TrimEnd('/')}/api/agent/idle", null);
+            if (!response.IsSuccessStatusCode)
+            {
+                _notifyIcon.ShowBalloonTip(2000, "时迹", "手动空闲触发失败", ToolTipIcon.Warning);
+            }
+        }
+        catch
+        {
+            _notifyIcon.ShowBalloonTip(2000, "时迹", "手动空闲触发失败", ToolTipIcon.Warning);
+        }
+    }
+
     protected override void WndProc(ref Message message)
     {
-        if (message.Msg == WmHotkey && message.WParam.ToInt32() == BrowserHotkeyId)
+        if (message.Msg == WmHotkey)
         {
-            _ = OpenBrowserAsync();
+            var id = message.WParam.ToInt32();
+            if (id == BrowserHotkeyId)
+            {
+                _ = OpenBrowserAsync();
+            }
+            else if (id == ManualIdleHotkeyId)
+            {
+                _ = TriggerManualIdleAsync();
+            }
         }
         base.WndProc(ref message);
     }
@@ -713,6 +831,7 @@ public sealed class TrayForm : Form
     protected override void OnHandleDestroyed(EventArgs e)
     {
         UnregisterBrowserHotkey();
+        UnregisterManualIdleHotkey();
         base.OnHandleDestroyed(e);
     }
 
@@ -729,17 +848,19 @@ public sealed class TrayForm : Form
             return;
         }
 
-        var presence = await GetBrowserPresenceAsync();
-        if (presence)
-        {
-            BrowserWindowHelper.TryActivateBrowserWindow();
-            return;
-        }
+        _lastBrowserLaunchAt = DateTime.UtcNow;
+        _dashboard ??= new DashboardForm(_url, OpenExternalBrowserAsync);
+        _dashboard.ShowDashboard();
+        await Task.CompletedTask;
+    }
 
+    private async Task OpenExternalBrowserAsync()
+    {
         try
         {
+            var presence = await GetBrowserPresenceAsync();
+            if (presence && BrowserWindowHelper.TryActivateBrowserWindow()) return;
             Process.Start(new ProcessStartInfo(_url) { UseShellExecute = true });
-            _lastBrowserLaunchAt = DateTime.UtcNow;
         }
         catch
         {
@@ -766,7 +887,7 @@ public sealed class TrayForm : Form
     {
         if (_closingForExit) return;
         _closingForExit = true;
-        await NativeControlClient.SendAsync("exit");
+        await NativeControlClient.StopAsync();
         await WaitForNativeExitAsync();
         _timer.Stop();
         _notifyIcon.Visible = false;
@@ -777,6 +898,7 @@ public sealed class TrayForm : Form
 
     private static int? FindRunningNativeProcessId()
     {
+        var baseDirectory = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         try
         {
             return Process.GetProcessesByName("时迹")
@@ -784,7 +906,9 @@ public sealed class TrayForm : Form
                 {
                     try
                     {
-                        return process.MainModule?.FileName?.Contains("UsageTrackerWeb\\publish", StringComparison.OrdinalIgnoreCase) == true;
+                        var path = process.MainModule?.FileName;
+                        return !string.IsNullOrWhiteSpace(path)
+                            && path.StartsWith(baseDirectory, StringComparison.OrdinalIgnoreCase);
                     }
                     catch
                     {
@@ -848,6 +972,9 @@ public sealed class TrayForm : Form
             _trayClickTimer.Dispose();
             NativeTheme.Changed -= NativeTheme_Changed;
             _trayMenu?.CloseAnimated();
+            _dashboard?.CloseDashboard();
+            _statusWindow?.Close();
+            _statusWindow?.Dispose();
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
         }

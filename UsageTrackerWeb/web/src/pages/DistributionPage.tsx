@@ -230,10 +230,8 @@ export default function DistributionPage({ active, theme, subjects, mergeMode }:
     <div className="page distribution-page">
       <div className="page-header">
         <div>
-          <h2>时长分布</h2>
           <div className="page-subtitle">
-            最新日期在最上方 · 每天 4:00 为分界
-            {updatedAt && ` · 更新于 ${updatedAt.toLocaleTimeString('zh-CN')}`}
+            {updatedAt && `更新于 ${updatedAt.toLocaleTimeString('zh-CN')}`}
             {refreshing && <span className="refresh-status"> · 正在刷新…</span>}
             {refreshError && <span className="refresh-status error"> · 刷新失败，仍显示上次数据</span>}
             {data && ` · ${visibleSessions.length} / ${data.sessions.length} 段`}
@@ -438,8 +436,9 @@ export default function DistributionPage({ active, theme, subjects, mergeMode }:
       </div>
 
       <LoadingTransition loading={!data} className="distribution-loading-transition">
+        {!data && <div className="distribution-empty-state"><strong>正在加载时长分布…</strong><span>如果长时间没有图表，请点击“立即刷新”。</span></div>}
         {data ? (
-        <>
+        <div className="distribution-content">
           <div className="distribution-summary">
             <div className="distribution-summary-card featured">
               <span className="summary-icon">◴</span>
@@ -465,7 +464,7 @@ export default function DistributionPage({ active, theme, subjects, mergeMode }:
             mergeMode={mergeMode}
             height="100%"
           />
-        </>
+        </div>
       ) : null}
       </LoadingTransition>
     </div>
