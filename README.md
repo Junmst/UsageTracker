@@ -9,11 +9,7 @@
 [![Runtime](https://img.shields.io/badge/.NET-8%20self--contained-8A2BE2)](https://github.com/Junmst/UsageTracker/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](#-许可证)
 
-<<<<<<< HEAD
-### [⬇️ 点击下载最新版（解压即用）]([https://github.com/Junmst/UsageTracker/releases/latest](https://github.com/Junmst/UsageTracker/releases/download/v4.0.0/shiji-v4.0.0-web-win-x64.zip))
-=======
 ### [⬇️ 点击下载最新版（解压即用）](https://github.com/Junmst/UsageTracker/releases/download/v4.0.0/shiji-v4.0.0-web-win-x64.zip)
->>>>>>> 3ecee52 (README 顶部下载链接改为 v4.0.0 压缩包直链，点击即下载)
 
 <img src="docs/screenshots/overview.png" width="100%" alt="总览页 —— 每日使用节奏与应用排行"/>
 
