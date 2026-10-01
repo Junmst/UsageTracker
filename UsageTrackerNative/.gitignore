@@ -4,7 +4,7 @@ data-backups/
 installer/
 latest/
 latest2/
-lib/
+# SQLite 运行时（Microsoft.Data.Sqlite / SQLitePCLRaw / e_sqlite3）由 csproj HintPath 引用，必须随源码提供
 packages/
 publish/
 releases/
