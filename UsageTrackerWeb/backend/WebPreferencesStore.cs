@@ -107,6 +107,19 @@ public sealed class WebPreferencesStore
         Save(snapshot);
     }
 
+    /// <summary>持久化“显示/隐藏小窗”快捷键。</summary>
+    public void SaveStatusWindowHotkey(uint modifiers, uint key, string gesture)
+    {
+        var snapshot = Load();
+        snapshot.StatusWindowHotkey = new SavedBrowserHotkey
+        {
+            Modifiers = modifiers,
+            Key = key,
+            Gesture = gesture,
+        };
+        Save(snapshot);
+    }
+
     private void Save(WebPreferencesSnapshot snapshot)
     {
         lock (_sync)
@@ -131,6 +144,7 @@ public sealed class WebPreferencesSnapshot
     public SavedOverviewRange? OverviewRange { get; set; }
     public SavedBrowserHotkey? BrowserHotkey { get; set; }
     public SavedBrowserHotkey? ManualIdleHotkey { get; set; }
+    public SavedBrowserHotkey? StatusWindowHotkey { get; set; }
 }
 
 public sealed class SavedBrowserHotkey

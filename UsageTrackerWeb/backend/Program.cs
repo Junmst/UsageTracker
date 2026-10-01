@@ -581,6 +581,86 @@ app.MapPost("/api/agent/exit", async (CancellationToken cancellationToken) =>
 
 app.MapGet("/api/web-preferences", () => Json(webPreferences.Load()));
 
+// ---- 原启动器功能（全局快捷键、登录后启动）迁移到 Web 设置页 ----
+app.MapGet("/api/launcher/config", () =>
+{
+    var prefs = webPreferences.Load();
+    // 网页快捷键从未设置过时按默认值展示（与 TrayForm 实际注册一致）；用户清除过（0/0）则显示未设置
+    object? browserHotkey = prefs.BrowserHotkey is null
+        ? new { modifiers = TrayForm.DefaultBrowserHotkeyModifiers, key = TrayForm.DefaultBrowserHotkeyKey, gesture = TrayForm.DefaultBrowserHotkeyGesture }
+        : HotkeyDto(prefs.BrowserHotkey);
+    return Json(new
+    {
+        browserHotkey,
+        manualIdleHotkey = HotkeyDto(prefs.ManualIdleHotkey),
+        statusWindowHotkey = HotkeyDto(prefs.StatusWindowHotkey),
+        startupEnabled = StartupRegistration.IsEnabled(),
+    });
+});
+
+static object? HotkeyDto(SavedBrowserHotkey? hotkey)
+    => hotkey is { Modifiers: > 0, Key: > 0 }
+        ? new { modifiers = hotkey.Modifiers, key = hotkey.Key, gesture = hotkey.Gesture }
+        : null;
+
+app.MapPost("/api/launcher/browser-hotkey", (JsonElement body) =>
+{
+    var (modifiers, key) = ReadHotkeyBody(body);
+    // 0/0 表示清除；只有一个为 0 属于无效输入
+    if ((modifiers == 0) != (key == 0)) return Results.BadRequest(new { error = "快捷键无效：需要至少一个修饰键加一个按键" });
+    var tray = TrayForm.Instance;
+    if (tray is null) return Results.Problem("托盘程序未就绪", statusCode: 503);
+    var result = ((string Gesture, bool Registered))tray.Invoke(() => tray.UpdateBrowserHotkey(modifiers, key))!;
+    return result.Registered
+        ? Results.Json(new { gesture = result.Gesture, registered = true })
+        : Results.Problem("该快捷键已被其他程序占用", statusCode: 409);
+});
+
+app.MapPost("/api/launcher/idle-hotkey", (JsonElement body) =>
+{
+    var (modifiers, key) = ReadHotkeyBody(body, allowClear: true);
+    var tray = TrayForm.Instance;
+    if (tray is null) return Results.Problem("托盘程序未就绪", statusCode: 503);
+    var result = ((string Gesture, bool Registered))tray.Invoke(() => tray.UpdateManualIdleHotkey(modifiers, key))!;
+    return result.Registered
+        ? Results.Json(new { gesture = result.Gesture, registered = true })
+        : Results.Problem("该快捷键已被其他程序占用", statusCode: 409);
+});
+
+app.MapPost("/api/launcher/status-window-hotkey", (JsonElement body) =>
+{
+    var (modifiers, key) = ReadHotkeyBody(body, allowClear: true);
+    var tray = TrayForm.Instance;
+    if (tray is null) return Results.Problem("托盘程序未就绪", statusCode: 503);
+    var result = ((string Gesture, bool Registered))tray.Invoke(() => tray.UpdateStatusWindowHotkey(modifiers, key))!;
+    return result.Registered
+        ? Results.Json(new { gesture = result.Gesture, registered = true })
+        : Results.Problem("该快捷键已被其他程序占用", statusCode: 409);
+});
+
+static (uint Modifiers, uint Key) ReadHotkeyBody(JsonElement body, bool allowClear = false)
+{
+    var modifiers = body.TryGetProperty("modifiers", out var m) && m.ValueKind == JsonValueKind.Number ? m.GetUInt32() : 0u;
+    var key = body.TryGetProperty("key", out var k) && k.ValueKind == JsonValueKind.Number ? k.GetUInt32() : 0u;
+    return allowClear ? (modifiers, key) : (modifiers, key);
+}
+
+app.MapPost("/api/launcher/startup", (JsonElement body) =>
+{
+    if (!body.TryGetProperty("enabled", out var enabledValue)
+        || (enabledValue.ValueKind != JsonValueKind.True && enabledValue.ValueKind != JsonValueKind.False))
+        return Results.BadRequest(new { error = "enabled 必须为布尔值" });
+    try
+    {
+        StartupRegistration.SetEnabled(enabledValue.GetBoolean());
+        return Results.NoContent();
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"设置登录后启动失败：{ex.Message}", statusCode: 500);
+    }
+});
+
 app.MapPost("/api/web-preferences/range", (SavedOverviewRange range) =>
 {
     if (string.IsNullOrWhiteSpace(range.From) || string.IsNullOrWhiteSpace(range.To)
@@ -739,13 +819,9 @@ var uiThread = new Thread(() =>
     Application.SetHighDpiMode(HighDpiMode.SystemAware);
     Application.EnableVisualStyles();
     Application.SetCompatibleTextRenderingDefault(false);
+    StartupRegistration.MigrateLegacyNativeEntry();
+    // 任何启动方式都显示托盘 + 小窗；--show 额外自动打开网页看板。
     using var tray = new TrayForm(app, url, args.Contains("--show"), webPreferences);
-    // 隐式启动：默认（无参数 / 开机自启）只显示小窗 + 托盘，不弹启动器与网页看板。
-    // --show 显式打开启动器 + 网页看板；--status-window 与默认一致，仅显示小窗。
-    if (!args.Contains("--show"))
-    {
-        tray.BeginInvoke(() => tray.ShowStatusWindowFromStartup());
-    }
     Application.Run(tray);
 })
 {

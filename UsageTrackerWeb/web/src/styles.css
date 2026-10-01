@@ -958,10 +958,15 @@ body.fog-animation-off::after {
 
 .idle-timeout-row {
   padding: 12px 18px 16px;
-  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 空闲判定独立成面板后不再需要顶部分隔线 */
+.idle-panel .idle-timeout-row {
+  border-top: none;
+  padding-top: 2px;
 }
 
 .idle-timeout-label {
@@ -1004,6 +1009,67 @@ body.fog-animation-off::after {
 
 .idle-timeout-current {
   font-size: 12px;
+}
+
+/* 快捷键与启动分区（原启动器功能迁移） */
+/* 设置页面板顺序（DOM 顺序与视觉顺序解耦）：个性化 → 快捷键 → 空闲判定 → 后台记录 → 信息列表 → 数据迁移 */
+.appearance-panel { order: 1; }
+.launcher-panel { order: 2; }
+.idle-panel { order: 3; }
+.agent-panel { order: 4; }
+.info-list { order: 5; }
+.transfer-panel { order: 6; }
+
+.launcher-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 18px 16px;
+}
+
+.launcher-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.launcher-row-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.launcher-row-label span:first-child {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.launcher-row-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hotkey-input {
+  width: 190px;
+  padding: 6px 10px;
+  background: var(--category-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  cursor: text;
+}
+
+.hotkey-input:focus,
+.hotkey-input.capturing {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .panel-title {

@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace UsageTrackerWeb;
@@ -14,8 +14,8 @@ internal sealed class TrayMenuForm : Form
     private static readonly Font TitleFont = new("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
     private static readonly Font ActionFont = new("Microsoft YaHei UI", 10F, FontStyle.Bold);
     private static readonly Font IconFont = new("Segoe UI Symbol", 10.5F, FontStyle.Bold);
-    private static readonly string[] Glyphs = ["⌂", "◷", "×"];
-    private static readonly string[] Labels = ["打开启动器", "打开网页看板", "退出网页程序"];
+    private readonly string[] _glyphs = ["⌂", "◷", "×"];
+    private readonly string[] _labels;
 
     private readonly System.Windows.Forms.Timer _closeTimer = new();
     private readonly System.Windows.Forms.Timer _animationTimer = new();
@@ -30,11 +30,13 @@ internal sealed class TrayMenuForm : Form
     private Action? _pendingAction;
 
     public TrayMenuForm(
-        Action openLauncher,
-        Action openBrowser,
-        Action exitAll)
+        Action openDashboard,
+        Action toggleStatusWindow,
+        Action exitAll,
+        bool statusWindowVisible)
     {
-        _actions = [openLauncher, openBrowser, exitAll];
+        _actions = [openDashboard, toggleStatusWindow, exitAll];
+        _labels = ["打开面板", statusWindowVisible ? "关闭小窗" : "打开小窗", "退出程序"];
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
@@ -126,10 +128,10 @@ internal sealed class TrayMenuForm : Form
             Width - (_menuPadding.X * 2) - 8,
             38), titleFormat);
 
-        for (var index = 0; index < Labels.Length; index++)
+        for (var index = 0; index < _labels.Length; index++)
         {
             var bounds = GetActionBounds(index);
-            var isDanger = index == Labels.Length - 1;
+            var isDanger = index == _labels.Length - 1;
             var isHighlighted = index == 0 || index == _hoverIndex;
             var background = isDanger && index == _hoverIndex
                 ? DangerSoft
@@ -154,8 +156,8 @@ internal sealed class TrayMenuForm : Form
             };
             var iconBounds = new Rectangle(bounds.X + 7, bounds.Y, 36, bounds.Height);
             var textBounds = new Rectangle(bounds.X + 51, bounds.Y, bounds.Width - 59, bounds.Height);
-            graphics.DrawString(Glyphs[index], IconFont, iconBrush, iconBounds, iconFormat);
-            graphics.DrawString(Labels[index], ActionFont, textBrush, textBounds, textFormat);
+            graphics.DrawString(_glyphs[index], IconFont, iconBrush, iconBounds, iconFormat);
+            graphics.DrawString(_labels[index], ActionFont, textBrush, textBounds, textFormat);
         }
     }
 
@@ -163,7 +165,7 @@ internal sealed class TrayMenuForm : Form
     {
         base.OnMouseMove(e);
         var nextHover = -1;
-        for (var index = 0; index < Labels.Length; index++)
+        for (var index = 0; index < _labels.Length; index++)
         {
             if (GetActionBounds(index).Contains(e.Location))
             {

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
-import type { AgentStatus, Meta, SubjectDefinition, TransferPreview } from '../lib/api';
+import type { AgentStatus, LauncherConfig, Meta, SubjectDefinition, TransferPreview } from '../lib/api';
 import { useDataChange } from '../lib/events';
 import type { ThemeController } from '../theme';
 import type { DistributionMergeMode } from '../components/TimeDistribution';
+import { HotkeyInput } from '../components/HotkeyInput';
 
 interface Props {
   theme: ThemeController;
@@ -42,6 +43,9 @@ export default function SettingsPage({
   const [idleTimeoutInput, setIdleTimeoutInput] = useState<string>('1');
   const [idleTimeoutBusy, setIdleTimeoutBusy] = useState(false);
   const [idleTimeoutMessage, setIdleTimeoutMessage] = useState('');
+  const [launcherConfig, setLauncherConfig] = useState<LauncherConfig | null>(null);
+  const [launcherBusy, setLauncherBusy] = useState(false);
+  const [launcherMessage, setLauncherMessage] = useState('');
   const planeRef = useRef<HTMLDivElement>(null);
   const transferInputRef = useRef<HTMLInputElement>(null);
 
@@ -55,6 +59,7 @@ export default function SettingsPage({
       }).catch(() => undefined);
     };
     refreshMetaSettings();
+    void api.launcherConfig(true).then(setLauncherConfig).catch(() => undefined);
     const loadAgent = () => void api.agentStatus(false).then(setAgent).catch(() => setAgent(null));
     loadAgent();
     const timer = window.setInterval(loadAgent, 3000);
@@ -93,6 +98,110 @@ export default function SettingsPage({
       setIdleTimeoutMessage(error instanceof Error ? error.message : '保存失败');
     } finally {
       setIdleTimeoutBusy(false);
+    }
+  };
+
+  const refreshLauncherConfig = () =>
+    api.launcherConfig(true).then(setLauncherConfig).catch(() => undefined);
+
+  const saveBrowserHotkey = async (modifiers: number, key: number) => {
+    setLauncherBusy(true);
+    setLauncherMessage('正在保存网页快捷键…');
+    try {
+      const result = await api.saveBrowserHotkey(modifiers, key);
+      await refreshLauncherConfig();
+      setLauncherMessage(`已保存网页快捷键 ${result.gesture}`);
+    } catch (error) {
+      setLauncherMessage(`网页快捷键保存失败：${error instanceof Error ? error.message : '未知原因'}`);
+    } finally {
+      setLauncherBusy(false);
+    }
+  };
+
+  const clearBrowserHotkey = async () => {
+    if (!launcherConfig?.browserHotkey) return;
+    setLauncherBusy(true);
+    setLauncherMessage('正在清除网页快捷键…');
+    try {
+      await api.saveBrowserHotkey(0, 0);
+      await refreshLauncherConfig();
+      setLauncherMessage('已清除网页快捷键');
+    } catch (error) {
+      setLauncherMessage(`清除网页快捷键失败：${error instanceof Error ? error.message : '未知原因'}`);
+    } finally {
+      setLauncherBusy(false);
+    }
+  };
+
+  const saveIdleHotkey = async (modifiers: number, key: number) => {
+    setLauncherBusy(true);
+    setLauncherMessage('正在保存空闲快捷键…');
+    try {
+      const result = await api.saveIdleHotkey(modifiers, key);
+      await refreshLauncherConfig();
+      setLauncherMessage(`已保存空闲快捷键 ${result.gesture}`);
+    } catch (error) {
+      setLauncherMessage(`空闲快捷键保存失败：${error instanceof Error ? error.message : '未知原因'}`);
+    } finally {
+      setLauncherBusy(false);
+    }
+  };
+
+  const clearIdleHotkey = async () => {
+    if (!launcherConfig?.manualIdleHotkey) return;
+    setLauncherBusy(true);
+    setLauncherMessage('正在清除空闲快捷键…');
+    try {
+      await api.saveIdleHotkey(0, 0);
+      await refreshLauncherConfig();
+      setLauncherMessage('已清除空闲快捷键');
+    } catch (error) {
+      setLauncherMessage(`清除空闲快捷键失败：${error instanceof Error ? error.message : '未知原因'}`);
+    } finally {
+      setLauncherBusy(false);
+    }
+  };
+
+  const saveStatusWindowHotkey = async (modifiers: number, key: number) => {
+    setLauncherBusy(true);
+    setLauncherMessage('正在保存小窗快捷键…');
+    try {
+      const result = await api.saveStatusWindowHotkey(modifiers, key);
+      await refreshLauncherConfig();
+      setLauncherMessage(`已保存小窗快捷键 ${result.gesture}`);
+    } catch (error) {
+      setLauncherMessage(`小窗快捷键保存失败：${error instanceof Error ? error.message : '未知原因'}`);
+    } finally {
+      setLauncherBusy(false);
+    }
+  };
+
+  const clearStatusWindowHotkey = async () => {
+    if (!launcherConfig?.statusWindowHotkey) return;
+    setLauncherBusy(true);
+    setLauncherMessage('正在清除小窗快捷键…');
+    try {
+      await api.saveStatusWindowHotkey(0, 0);
+      await refreshLauncherConfig();
+      setLauncherMessage('已清除小窗快捷键');
+    } catch (error) {
+      setLauncherMessage(`清除小窗快捷键失败：${error instanceof Error ? error.message : '未知原因'}`);
+    } finally {
+      setLauncherBusy(false);
+    }
+  };
+
+  const toggleStartup = async (enabled: boolean) => {
+    setLauncherBusy(true);
+    setLauncherMessage(enabled ? '正在开启登录后启动…' : '正在关闭登录后启动…');
+    try {
+      await api.setStartupEnabled(enabled);
+      await refreshLauncherConfig();
+      setLauncherMessage(enabled ? '已开启登录后启动' : '已关闭登录后启动');
+    } catch (error) {
+      setLauncherMessage(`设置失败：${error instanceof Error ? error.message : '未知原因'}`);
+    } finally {
+      setLauncherBusy(false);
     }
   };
 
@@ -199,6 +308,10 @@ export default function SettingsPage({
           </div>
           {agentMessage && <div className="toolbar-hint agent-message">{agentMessage}</div>}
         </div>
+      </div>
+
+      <div className="panel idle-panel">
+        <div className="panel-title">空闲判定</div>
         <div className="idle-timeout-row">
           <div className="idle-timeout-label">
             <span>空闲判定时长</span>
@@ -222,6 +335,80 @@ export default function SettingsPage({
             <span className="toolbar-hint idle-timeout-current">当前：{idleTimeoutMinutes} 分钟</span>
           </div>
           {idleTimeoutMessage && <div className="toolbar-hint agent-message">{idleTimeoutMessage}</div>}
+        </div>
+      </div>
+
+      <div className="panel launcher-panel">
+        <div className="panel-title">快捷键与启动</div>
+        <div className="launcher-rows">
+          <div className="launcher-row">
+            <div className="launcher-row-label">
+              <span>网页快捷键</span>
+              <span className="toolbar-hint">全局按下即打开网页看板，默认 Ctrl + Alt + W</span>
+            </div>
+            <div className="launcher-row-control">
+              <HotkeyInput
+                value={launcherConfig?.browserHotkey?.gesture ?? null}
+                disabled={launcherBusy}
+                onCapture={(modifiers, key) => void saveBrowserHotkey(modifiers, key)}
+              />
+              <button
+                className="toolbar-button"
+                disabled={launcherBusy || !launcherConfig?.browserHotkey}
+                onClick={() => void clearBrowserHotkey()}
+              >清除</button>
+            </div>
+          </div>
+          <div className="launcher-row">
+            <div className="launcher-row-label">
+              <span>空闲快捷键</span>
+              <span className="toolbar-hint">全局按下即进入手动空闲，未设置则不响应</span>
+            </div>
+            <div className="launcher-row-control">
+              <HotkeyInput
+                value={launcherConfig?.manualIdleHotkey?.gesture ?? null}
+                disabled={launcherBusy}
+                onCapture={(modifiers, key) => void saveIdleHotkey(modifiers, key)}
+              />
+              <button
+                className="toolbar-button"
+                disabled={launcherBusy || !launcherConfig?.manualIdleHotkey}
+                onClick={() => void clearIdleHotkey()}
+              >清除</button>
+            </div>
+          </div>
+          <div className="launcher-row">
+            <div className="launcher-row-label">
+              <span>小窗快捷键</span>
+              <span className="toolbar-hint">全局按下即显示或隐藏桌面小窗，未设置则不响应</span>
+            </div>
+            <div className="launcher-row-control">
+              <HotkeyInput
+                value={launcherConfig?.statusWindowHotkey?.gesture ?? null}
+                disabled={launcherBusy}
+                onCapture={(modifiers, key) => void saveStatusWindowHotkey(modifiers, key)}
+              />
+              <button
+                className="toolbar-button"
+                disabled={launcherBusy || !launcherConfig?.statusWindowHotkey}
+                onClick={() => void clearStatusWindowHotkey()}
+              >清除</button>
+            </div>
+          </div>
+          <div className="launcher-row">
+            <div className="launcher-row-label">
+              <span>登录后启动</span>
+              <span className="toolbar-hint">开机登录 Windows 后自动在后台开始记录</span>
+            </div>
+            <div className="launcher-row-control">
+              <button
+                className={`toolbar-button${launcherConfig?.startupEnabled ? ' active' : ''}`}
+                disabled={launcherBusy}
+                onClick={() => void toggleStartup(!launcherConfig?.startupEnabled)}
+              >{launcherConfig?.startupEnabled ? '已开启 · 点击关闭' : '已关闭 · 点击开启'}</button>
+            </div>
+          </div>
+          {launcherMessage && <div className="toolbar-hint agent-message">{launcherMessage}</div>}
         </div>
       </div>
 

@@ -83,6 +83,24 @@ export interface WebPreferences {
   overviewRange?: { from: string; to: string } | null;
 }
 
+export interface SavedHotkey {
+  modifiers: number;
+  key: number;
+  gesture: string;
+}
+
+export interface LauncherConfig {
+  browserHotkey: SavedHotkey | null;
+  manualIdleHotkey: SavedHotkey | null;
+  statusWindowHotkey: SavedHotkey | null;
+  startupEnabled: boolean;
+}
+
+export interface HotkeySaveResult {
+  gesture: string;
+  registered: boolean;
+}
+
 export interface AgentStatus {
   running: boolean;
   tracking: boolean;
@@ -238,6 +256,14 @@ export const api = {
   sessionCommand: (command: string, args: Record<string, unknown> = {}) => send<void>('/api/session/command', 'POST', { command, args }),
   bulkDeleteSessions: (sessions: SessionDto[]) => send<{ deleted: number }>('/api/session/command', 'POST', { command: 'session-bulk-delete', args: { sessions } }),
   webPreferences: () => get<WebPreferences>('/api/web-preferences', 60_000),
+  launcherConfig: (forceRefresh = false) => get<LauncherConfig>('/api/launcher/config', 0, forceRefresh),
+  saveBrowserHotkey: (modifiers: number, key: number) =>
+    send<HotkeySaveResult>('/api/launcher/browser-hotkey', 'POST', { modifiers, key }),
+  saveIdleHotkey: (modifiers: number, key: number) =>
+    send<HotkeySaveResult>('/api/launcher/idle-hotkey', 'POST', { modifiers, key }),
+  saveStatusWindowHotkey: (modifiers: number, key: number) =>
+    send<HotkeySaveResult>('/api/launcher/status-window-hotkey', 'POST', { modifiers, key }),
+  setStartupEnabled: (enabled: boolean) => send<void>('/api/launcher/startup', 'POST', { enabled }),
   saveOverviewRange: (from: string, to: string) =>
     send<WebPreferences>('/api/web-preferences/range', 'POST', { from, to }),
   clearOverviewRange: () => send<void>('/api/web-preferences/range', 'DELETE'),
