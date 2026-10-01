@@ -9,7 +9,7 @@
 [![Runtime](https://img.shields.io/badge/.NET-8%20self--contained-8A2BE2)](https://github.com/Junmst/UsageTracker/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](#-许可证)
 
-### [⬇️ 点击下载最新版（解压即用）](https://github.com/Junmst/UsageTracker/releases/download/v4.1.0/shiji-v4.1.0-web-win-x64.zip)
+### [⬇️ 点击下载最新版（解压即用）](https://github.com/Junmst/UsageTracker/releases/download/v4.0.0/UT-v4.0.0-win-x64.zip)
 
 <img src="docs/screenshots/overview.png" width="100%" alt="总览页 —— 每日使用节奏与应用排行"/>
 
@@ -32,13 +32,12 @@
 - **深浅色主题** —— 深色 / 浅色 / 跟随系统 + 34 色强调色预设 + 面板透明度调节
 - **数据完全本地** —— 无需联网注册；支持使用数据 / 分类配置 / 完整备份的导入导出，导入前预览与冲突统计
 
-## 🆕 v4.1.0 新特性
+## 🆕 v4.0.0 新特性
 
+- **移除启动器窗口** —— 全局快捷键与登录后启动迁入网页设置页；托盘菜单精简为「打开面板 / 小窗开关 / 退出程序」，小窗右键直接打开网页看板
 - **SSE 后台数据变更自动局部刷新** —— 任意页面操作或后台自动重分类后，前端自动局部更新，无需手动刷新
-- **总览页切换分类动效** —— 三环动画先以极大加速度提速至极速稳定旋转，加载完成后以同样加速度减速回常速；状态卡片实时显示"正在切换分类"
-- **桌面小窗交互升级** —— 右键打开启动器不再关闭小窗；双击左键直接打开网页看板；支持上下左右四边 0px 间隙吸附
-- **网页看板窗口优化** —— 默认尺寸调整为 1707×1093；标题栏与 WebView2 底色随 Web 深浅色主题自动切换
-- **虚拟桌面支持** —— 小窗、启动器、看板自动固定到所有 Windows 虚拟桌面，从任意桌面均可快速召唤
+- **桌面小窗交互升级** —— 支持上下左右四边 0px 间隙吸附；右键打开网页看板，单击进入手动空闲
+- **虚拟桌面支持** —— 小窗与网页看板自动固定到所有 Windows 虚拟桌面，从任意桌面均可快速召唤
 
 ## 🖼️ 界面预览
 
@@ -50,20 +49,20 @@
 
 ## 📦 下载即用
 
-1. 从 [**Releases**](https://github.com/Junmst/UsageTracker/releases/latest) 下载 `shiji-v*-web-win-x64.zip`
+1. 从 [**Releases**](https://github.com/Junmst/UsageTracker/releases/latest) 下载 `UT-v*-win-x64.zip`
 2. 完整解压到任意目录（不要只复制单个 exe）
-3. 双击 **`时迹Web.exe`** —— 启动器自动运行 `native\时迹.exe` 开始后台记录
-4. 从系统托盘图标或启动器打开网页看板
+3. 双击 **`时迹Web.exe`** —— 自动启动同目录 `时迹.exe` 开始后台记录
+4. 从系统托盘菜单、桌面小窗或全局快捷键打开网页看板
 
 > 💡 无需安装 .NET 运行时，压缩包已包含全部依赖。Windows 10/11 x64。
-> 数据保存在本地 `%LocalAppData%\UsageTrackerNative`，卸载只需删除目录。
+> 数据保存在本地 `%LocalAppData%\时迹`，卸载只需删除目录。
 
 ## 🏗️ 架构
 
 ```text
 ┌────────────────────────────────┐       Named Pipe        ┌────────────────────────────┐
-│  时迹Web.exe                    │ ◄─────────────────────► │  native\时迹.exe            │
-│  · 托盘启动器 + 桌面小窗         │                         │  · 前台窗口采样             │
+│  时迹Web.exe                    │ ◄─────────────────────► │  时迹.exe                   │
+│  · 托盘 + 桌面小窗              │                         │  · 前台窗口采样             │
 │  · WebView2 网页看板            │   web: 命令 / 查询       │  · UIA 真实标题读取         │
 │  · ASP.NET Core Minimal API    │   native: 会话数据       │  · 空闲 / 音频 / 视频检测    │
 │  · React + TypeScript + Vite   │                         │  · SQLite (WAL) 持久化      │
@@ -74,7 +73,7 @@
 | --- | --- |
 | `UsageTrackerNative/` | 无窗口后台记录代理（前台采样、UIA 标题、空闲/媒体检测、SQLite） |
 | `UsageTrackerWeb/web/` | React + TypeScript + Vite 前端 |
-| `UsageTrackerWeb/backend/` | ASP.NET Core 启动器、Minimal API、托盘 / 小窗 / WebView2 壳 |
+| `UsageTrackerWeb/backend/` | ASP.NET Core Minimal API、托盘 / 小窗 / WebView2 壳 |
 | `UsageTrackerNative/tests/` | 核心逻辑回归测试（日界线、跨日裁剪、表达式匹配、分类优先级） |
 
 Web 与 Native 通过 Named Pipe 通信；Web 端以只读方式访问 SQLite（WAL 模式），读写分离互不阻塞。
@@ -89,17 +88,17 @@ cd UsageTrackerWeb/web
 npm ci
 npm run build
 
-# 2. Web 后端（启动器 + 看板 + API）
+# 2. Web 后端（托盘 + 看板 + API）
 cd ..\backend
 dotnet publish -c Release -r win-x64 --self-contained true -o ..\..\publish
 
-# 3. Native 后台记录代理
+# 3. Native 后台记录代理（与 Web 输出到同一目录）
 cd ..\..\UsageTrackerNative\src\UsageTrackerNative
-dotnet publish -c Release -r win-x64 --self-contained true -o ..\..\..\publish\native
+dotnet publish -c Release -r win-x64 --self-contained true -o ..\..\..\publish
 ```
 
 > `UsageTrackerWeb/backend/UsageTrackerWeb.csproj` 默认在 `dotnet build/publish` 前自动执行前端构建；离线或只验证后端时可加 `-p:SkipFrontendBuild=true`。
-> 发布顺序必须先 Web 后端、后 Native：启动器只会启动同目录 `publish\native\时迹.exe`，缺少该子目录时看板无法读写数据。
+> 发布顺序必须先 Web 后端、后 Native：时迹Web 只会启动同目录的 `时迹.exe`，缺少该文件时看板无法读写数据。
 
 ## 🧪 自动化测试
 
