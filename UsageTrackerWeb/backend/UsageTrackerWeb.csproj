@@ -22,6 +22,10 @@
     <Version>3.3.0</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+    <!-- 本机托盘小服务（仅服务 127.0.0.1 的 WebView2），无需 Server GC 的多核堆：
+         Server GC 会按逻辑核心数预留大量堆段（本机空进程即可达数百 MB）；改用工作站 GC 显著降低常驻内存。 -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
     <!-- 前端构建直接生成 wwwroot，dotnet build/publish 会先执行 npm ci 和 npm run build。 -->
     <EnableDefaultContentItems>true</EnableDefaultContentItems>
     <EnableFrontendBuild Condition="'$(SkipFrontendBuild)' != 'true'">true</EnableFrontendBuild>

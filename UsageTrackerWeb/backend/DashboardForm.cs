@@ -13,7 +13,6 @@ internal sealed class DashboardForm : Form
     private readonly SettingsReader _settingsReader = new(string.Empty);
     private readonly System.Windows.Forms.Timer _themeDebounce = new() { Interval = 300 };
     private FileSystemWatcher? _settingsWatcher;
-    private bool _allowClose;
     private bool _initialized;
 
     public DashboardForm(string url, Func<Task> fallback)
@@ -39,7 +38,9 @@ internal sealed class DashboardForm : Form
         Controls.Add(_webView);
         Controls.Add(_errorLabel);
         Shown += DashboardForm_Shown;
-        FormClosing += DashboardForm_FormClosing;
+        // 用户点关闭按钮即真正销毁窗口（而不是隐藏常驻）：
+        // 隐藏时 WebView2 渲染进程仍会保留整页 JS（SSE/轮询/Canvas 动画），白白占用数百 MB。
+        // 关闭后 Form 与 WebView2 一并释放，Chromium 进程组随之退出；下次从托盘/小窗/快捷键重新打开。
         // 窗口标题栏/加载底色跟随 Web 深浅色：设置保存到 settings.json，监听其变化即时切换
         _themeDebounce.Tick += (_, _) =>
         {
@@ -165,14 +166,9 @@ internal sealed class DashboardForm : Form
         }
     }
 
-    private void DashboardForm_FormClosing(object? sender, FormClosingEventArgs e)
-    {
-        if (e.CloseReason == CloseReason.UserClosing && !_allowClose)
-        {
-            e.Cancel = true;
-            Hide();
-        }
-    }
+    // 用户点关闭按钮即真正销毁窗口（而不是隐藏常驻）：
+    // 隐藏时 WebView2 渲染进程仍会保留整页 JS（SSE/轮询/Canvas 动画），白白占用数百 MB。
+    // 关闭后 Form 与 WebView2 一并释放，Chromium 进程组随之退出；下次从托盘/小窗/快捷键重新打开。
 
     private void ShowError(string message)
     {
@@ -200,7 +196,6 @@ internal sealed class DashboardForm : Form
     public void CloseDashboard()
     {
         if (IsDisposed) return;
-        _allowClose = true;
         Close();
     }
 
@@ -215,6 +210,8 @@ internal sealed class DashboardForm : Form
                 _settingsWatcher.EnableRaisingEvents = false;
                 _settingsWatcher.Dispose();
             }
+            // 显式释放 WebView2：最后一个 WebView 释放后 Chromium 浏览器/渲染/GPU 进程组退出，内存归还系统
+            _webView.Dispose();
         }
         base.Dispose(disposing);
     }

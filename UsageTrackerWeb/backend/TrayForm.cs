@@ -374,7 +374,12 @@ public sealed class TrayForm : Form
         }
 
         _lastBrowserLaunchAt = DateTime.UtcNow;
-        _dashboard ??= new DashboardForm(_url, OpenExternalBrowserAsync);
+        if (_dashboard is null || _dashboard.IsDisposed)
+        {
+            _dashboard = new DashboardForm(_url, OpenExternalBrowserAsync);
+            // 看板关闭即销毁 WebView2 进程组；清空引用，下次打开时重新创建
+            _dashboard.FormClosed += (_, _) => _dashboard = null;
+        }
         _dashboard.ShowDashboard();
         VirtualDesktopHelper.BringToSameDesktop(_statusWindow?.Handle ?? IntPtr.Zero, _dashboard.Handle);
         await System.Threading.Tasks.Task.CompletedTask;
