@@ -723,11 +723,11 @@ app.MapGet("/api/browser-presence", () =>
     });
 });
 
-app.MapGet("/api/search", (string? q, int? skip, int? take, string? date, bool? allHistory, string? mode, string? subject) =>
+app.MapGet("/api/search", (string? q, string? subjectQuery, int? skip, int? take, string? date, bool? allHistory, string? mode, string? subject) =>
 {
     if (DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var selectedDate))
     {
-        return Json(store.SearchAdvanced(q, skip ?? 0, take ?? 50, selectedDate, allHistory == true, mode, settingsReader.Load().SubjectDefinitions ?? [], subject));
+        return Json(store.SearchAdvanced(q, skip ?? 0, take ?? 50, selectedDate, allHistory == true, mode, settingsReader.Load().SubjectDefinitions ?? [], subject, subjectQuery));
     }
 
     return Json(store.Search(q, skip ?? 0, take ?? 50));

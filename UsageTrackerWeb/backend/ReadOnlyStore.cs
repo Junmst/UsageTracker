@@ -400,14 +400,15 @@ public sealed class ReadOnlyStore
     }
 
     public SearchResultDto SearchAdvanced(
-        string? keyword,
+        string? titleExpression,
         int skip,
         int take,
         DateTime date,
         bool allHistory,
         string? mode,
         IReadOnlyList<SubjectDefinitionDto> definitions,
-        string? subjectFilter = null)
+        string? subjectFilter = null,
+        string? subjectExpression = null)
     {
         var start = allHistory ? DateTime.MinValue : UsageTimeRange.GetDayStart(date);
         var end = allHistory ? DateTime.Now.AddSeconds(1) : UsageTimeRange.GetDayEnd(date);
@@ -415,7 +416,8 @@ public sealed class ReadOnlyStore
         var lookup = BuildSubjectLookup(definitions);
         var sessions = GetSessionsIntersecting(start, end)
             .Where(session => MatchesSubjectFilter(session.ManualSubject, subjectFilter, definitions))
-            .Where(session => MatchesExpression(session, keyword, normalizedMode, lookup))
+            .Where(session => MatchesTitleExpression(session, titleExpression, normalizedMode, lookup))
+            .Where(session => MatchesSubjectExpression(session, subjectExpression, lookup))
             .OrderByDescending(session => session.StartTime)
             .ToList();
         take = Math.Clamp(take, 1, 200);
@@ -475,82 +477,52 @@ public sealed class ReadOnlyStore
         return lookup;
     }
 
-    private static bool MatchesExpression(SessionDto session, string? expression, string mode, IReadOnlyDictionary<string, HashSet<string>> lookup)
+    // 标题表达式：默认仅匹配窗口标题；mode=process 时匹配进程名（旧接口兼容）；mode=subject 时按分类匹配。
+    // 表达式语法与 Native SearchExpressionMatcher 完全一致（+ 或、* 与、- 差集、! 非、() 分组）。
+    private static bool MatchesTitleExpression(
+        SessionDto session,
+        string? expression,
+        string mode,
+        IReadOnlyDictionary<string, HashSet<string>> lookup)
     {
         if (string.IsNullOrWhiteSpace(expression)) return true;
-        return EvaluateOr(expression.Trim());
-
-        bool EvaluateOr(string text)
+        Func<string, bool> matchTerm = mode switch
         {
-            var parts = SplitOutside(text, '|');
-            return parts.Count > 1 ? parts.Any(EvaluateAnd) : EvaluateAnd(text);
-        }
-        bool EvaluateAnd(string text)
-        {
-            var parts = SplitOutside(text, '&');
-            return parts.Count > 1 ? parts.All(EvaluateNot) : EvaluateNot(text);
-        }
-        bool EvaluateNot(string text)
-        {
-            text = text.Trim();
-            var negate = false;
-            while (text.StartsWith('!') || text.StartsWith('！'))
-            {
-                negate = !negate;
-                text = text[1..].Trim();
-            }
-            var value = text.Length >= 2 && ((text[0] == '(' && text[^1] == ')') || (text[0] == '（' && text[^1] == '）'))
-                ? EvaluateOr(text[1..^1])
-                : MatchTerm(text);
-            return negate ? !value : value;
-        }
-        bool MatchTerm(string term)
-        {
-            var separator = term.IndexOfAny([':', '：']);
-            if (separator > 0 && separator < term.Length - 1)
-            {
-                var scope = term[..separator].Trim().ToLowerInvariant();
-                term = term[(separator + 1)..].Trim();
-                return scope is "分类" or "科目" or "subject" ? MatchSubject(term)
-                    : scope is "标题" or "窗口" or "title" ? Contains(session.WindowTitle, term)
-                    : scope is "进程" or "程序" or "process" or "proc" && Contains(session.ProcessName, term);
-            }
-            return mode switch
-            {
-                "subject" => MatchSubject(term),
-                "title" => Contains(session.WindowTitle, term),
-                "process" => Contains(session.ProcessName, term),
-                _ => MatchSubject(term) || Contains(session.WindowTitle, term) || Contains(session.ProcessName, term)
-            };
-        }
-        bool MatchSubject(string term)
-        {
-            var subject = session.ManualSubject ?? string.Empty;
-            return lookup.TryGetValue(term.Trim(), out var linked)
-                ? linked.Contains(subject)
-                : Contains(subject, term);
-        }
-        static bool Contains(string value, string term) => value.Contains(term, StringComparison.OrdinalIgnoreCase);
+            "subject" => term => MatchSubjectTerm(session, term, lookup),
+            "process" => term => Contains(session.ProcessName, term),
+            _ => term => Contains(session.WindowTitle, term),
+        };
+        return SearchExpressionMatcher.IsMatch(expression, matchTerm);
     }
 
-    private static List<string> SplitOutside(string text, char separator)
+    // 分类表达式：NULL 表示空分类；其余词按分类层级（大类含其全部子孙）或名称包含匹配。
+    private static bool MatchesSubjectExpression(
+        SessionDto session,
+        string? expression,
+        IReadOnlyDictionary<string, HashSet<string>> lookup)
     {
-        var result = new List<string>();
-        var depth = 0;
-        var start = 0;
-        for (var i = 0; i < text.Length; i++)
-        {
-            if (text[i] is '(' or '（') depth++;
-            else if (text[i] is ')' or '）') depth--;
-            else if (text[i] == separator && depth == 0)
-            {
-                result.Add(text[start..i]);
-                start = i + 1;
-            }
-        }
-        result.Add(text[start..]);
-        return result;
+        if (string.IsNullOrWhiteSpace(expression)) return true;
+        return SearchExpressionMatcher.IsMatch(expression, term => MatchSubjectTerm(session, term, lookup));
     }
+
+    private static bool MatchSubjectTerm(
+        SessionDto session,
+        string term,
+        IReadOnlyDictionary<string, HashSet<string>> lookup)
+    {
+        var trimmed = term.Trim();
+        if (trimmed.Equals("NULL", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.IsNullOrWhiteSpace(session.ManualSubject);
+        }
+
+        var subject = session.ManualSubject ?? string.Empty;
+        return lookup.TryGetValue(trimmed, out var linked)
+            ? linked.Contains(subject)
+            : Contains(subject, trimmed);
+    }
+
+    private static bool Contains(string value, string term) => value.Contains(term, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>当前进行中的会话（ActiveSession 单行表，由桌面版维护）。</summary>
     public SessionDto? GetActiveSession()

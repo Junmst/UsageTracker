@@ -2363,6 +2363,26 @@ body.fog-animation-off::after {
   pointer-events: none;
 }
 
+/* 使用明细：标题 / 分类 组合搜索双输入框 */
+.search-shell.search-field .search-input {
+  width: 218px;
+  padding-left: 54px;
+}
+
+.search-field-tag {
+  position: absolute;
+  left: 10px;
+  z-index: 1;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
 .search-clear {
   position: absolute;
   right: 9px;
@@ -3289,77 +3309,6 @@ body.fog-animation-off::after {
   content: '↳';
   margin-right: 5px;
   color: var(--accent);
-}
-
-/* ─── 使用明细：查找模式菜单（视觉与交互镜像 subject-filter） ─── */
-.search-mode-menu {
-  position: relative;
-}
-
-.search-mode-dropdown {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 40;
-  max-height: 320px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  background: var(--panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1.5px solid rgba(255, 255, 255, 0.85);
-  border-radius: var(--radius);
-  padding: 8px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  box-shadow: var(--shadow-lg);
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transform: translateY(-8px) scale(0.97);
-  transform-origin: top right;
-  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s;
-}
-
-.search-mode-menu.menu-open .search-mode-dropdown {
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
-  transform: translateY(0) scale(1);
-}
-
-.search-mode-menu.menu-open .search-mode-item {
-  animation: menu-item-enter 0.22s both;
-}
-
-.search-mode-menu.menu-open .search-mode-item:nth-child(1) { animation-delay: 0s; }
-.search-mode-menu.menu-open .search-mode-item:nth-child(2) { animation-delay: 0.02s; }
-.search-mode-menu.menu-open .search-mode-item:nth-child(3) { animation-delay: 0.04s; }
-.search-mode-menu.menu-open .search-mode-item:nth-child(4) { animation-delay: 0.06s; }
-
-.search-mode-item {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 13px;
-  text-align: left;
-  padding: 8px 16px;
-  cursor: pointer;
-  width: 100%;
-  transition: 0.15s;
-}
-
-.search-mode-item:hover {
-  background: var(--category-card);
-  color: var(--text-primary);
-}
-
-.search-mode-item.active {
-  color: var(--accent);
-  font-weight: 700;
 }
 
 /* ─── 分布图 ─── */

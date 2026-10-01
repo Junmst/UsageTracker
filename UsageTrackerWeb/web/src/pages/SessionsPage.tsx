@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import LoadingTransition from '../components/LoadingTransition';
-import SearchModeMenu from '../components/SearchModeMenu';
 import DatePickerPopover from '../components/DatePickerPopover';
 import SubjectBadge from '../components/SubjectBadge';
 import { api, invalidateResponseCache } from '../lib/api';
@@ -11,9 +10,10 @@ import { formatDurationShort, formatHoursMinutes, formatDateKey, getTimeDistribu
 const PAGE_SIZE = 50;
 
 export default function SessionsPage() {
-  const [keyword, setKeyword] = useState('');
-  const [query, setQuery] = useState('');
-  const [mode, setMode] = useState('all');
+  const [titleKeyword, setTitleKeyword] = useState('');
+  const [titleQuery, setTitleQuery] = useState('');
+  const [subjectKeyword, setSubjectKeyword] = useState('');
+  const [subjectQuery, setSubjectQuery] = useState('');
   const [allHistory, setAllHistory] = useState(false);
   const [selectedDate, setSelectedDate] = useState(formatDateKey(getTimeDistributionDate(new Date())));
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -59,10 +59,10 @@ export default function SessionsPage() {
         if (!force && current.version === version) return;
         version = current.version;
         if (!silent) setLoading(true);
-        const result = await api.search(query, skip, PAGE_SIZE, true, {
+        const result = await api.search(titleQuery, skip, PAGE_SIZE, true, {
           date: selectedDate,
           allHistory,
-          mode,
+          subjectQuery,
         });
         if (cancelled) return;
         setItems(result.items);
@@ -87,7 +87,7 @@ export default function SessionsPage() {
       window.clearInterval(timer);
       window.removeEventListener('focus', onFocus);
     };
-  }, [query, skip, selectedDate, allHistory, mode]);
+  }, [titleQuery, subjectQuery, skip, selectedDate, allHistory]);
 
   // FLIP：新记录在顶部渐显滑入，其余行平滑下移；删除时剩余行平滑上移。
   // 翻页/搜索/切日期（id 集合整体替换）不做动画，避免长距离漂移。
@@ -181,7 +181,20 @@ export default function SessionsPage() {
 
   const runSearch = () => {
     setSkip(0);
-    setQuery(keyword.trim());
+    setTitleQuery(titleKeyword.trim());
+    setSubjectQuery(subjectKeyword.trim());
+  };
+
+  const clearTitle = () => {
+    setTitleKeyword('');
+    setTitleQuery('');
+    setSkip(0);
+  };
+
+  const clearSubject = () => {
+    setSubjectKeyword('');
+    setSubjectQuery('');
+    setSkip(0);
   };
 
   // 分类按“进程 + 窗口标题”生效：一次提交一个代表记录，后端会同步同进程同标题的全部记录。
@@ -442,21 +455,33 @@ export default function SessionsPage() {
           <button className={`toolbar-button${allHistory ? ' active' : ''}`} onClick={() => { setAllHistory((value) => !value); setSkip(0); }}>
             {allHistory ? '全历史' : '当前日期'}
           </button>
-          <div className="search-shell">
-            <span className="search-symbol">⌕</span>
+          <div className="search-shell search-field" title="标题关键字，支持 + 或、* 与、- 剔除、() 分组，如 咸鱼-哔哩哔哩">
+            <span className="search-field-tag">标题</span>
             <input
               className="search-input"
-              value={keyword}
-              placeholder="支持 分类:、标题:、进程:、& | ! ()"
-              onChange={(event) => setKeyword(event.target.value)}
+              value={titleKeyword}
+              placeholder="标题关键字"
+              onChange={(event) => setTitleKeyword(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') runSearch();
               }}
             />
-            {keyword && <button className="search-clear" onClick={() => setKeyword('')} aria-label="清除搜索">×</button>}
+            {titleKeyword && <button className="search-clear" onClick={clearTitle} aria-label="清除标题条件">×</button>}
+          </div>
+          <div className="search-shell search-field" title="分类名或 NULL（空分类），支持 + 或、* 与、- 剔除、() 分组，如 NULL+国考">
+            <span className="search-field-tag">分类</span>
+            <input
+              className="search-input"
+              value={subjectKeyword}
+              placeholder="分类名 / NULL 空分类"
+              onChange={(event) => setSubjectKeyword(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') runSearch();
+              }}
+            />
+            {subjectKeyword && <button className="search-clear" onClick={clearSubject} aria-label="清除分类条件">×</button>}
           </div>
           <button className="toolbar-button active" onClick={runSearch}>搜索</button>
-          <SearchModeMenu value={mode} onChange={(value) => { setMode(value); setSkip(0); }} />
           <DatePickerPopover value={selectedDate} align="right" disabled={allHistory} onChange={(value) => { setSelectedDate(value); setSkip(0); }} />
         </div>
       </div>

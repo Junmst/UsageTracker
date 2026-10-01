@@ -240,9 +240,9 @@ export const api = {
   subjectCommand: (command: string, args: Record<string, unknown> = {}) => send<{ success: boolean; message?: string; data?: unknown }>('/api/subject-management/command', 'POST', { command, args }),
   searchVersion: (forceRefresh = false) =>
     get<{ version: string }>('/api/search-version', 0, forceRefresh),
-  search: (q: string, skip = 0, take = 50, forceRefresh = false, options?: { date?: string; allHistory?: boolean; mode?: string; subject?: string | null }) =>
+  search: (q: string, skip = 0, take = 50, forceRefresh = false, options?: { date?: string; allHistory?: boolean; mode?: string; subject?: string | null; subjectQuery?: string }) =>
     get<SearchResult>(
-      `/api/search?${new URLSearchParams({ q, skip: String(skip), take: String(take), ...(options?.date ? { date: options.date } : {}), ...(options?.allHistory ? { allHistory: 'true' } : {}), ...(options?.mode ? { mode: options.mode } : {}), ...(options?.subject ? { subject: options.subject } : {}) })}`,
+      `/api/search?${new URLSearchParams({ q, skip: String(skip), take: String(take), ...(options?.date ? { date: options.date } : {}), ...(options?.allHistory ? { allHistory: 'true' } : {}), ...(options?.mode ? { mode: options.mode } : {}), ...(options?.subject ? { subject: options.subject } : {}), ...(options?.subjectQuery ? { subjectQuery: options.subjectQuery } : {}) })}`,
       15_000,
       forceRefresh
     ),

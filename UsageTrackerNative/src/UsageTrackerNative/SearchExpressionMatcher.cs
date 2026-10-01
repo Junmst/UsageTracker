@@ -5,7 +5,10 @@ namespace UsageTrackerNative;
 
 public static class SearchExpressionMatcher
 {
-    private static readonly char[] OperatorChars = ['&', '|', '!', '！', '(', ')', '（', '）'];
+    // 运算符：+ 或（兼容旧 |）、* 与（兼容旧 &）、- 差集（a-b 表示命中 a 且不命中 b）、! 非、() 分组；
+    // 同时接受全角 ＋－＊（），方便中文输入法直接录入。
+    private static readonly char[] OperatorChars =
+        ['+', '＋', '*', '＊', '-', '－', '|', '&', '!', '！', '(', ')', '（', '）'];
 
     public static bool IsMatch(string? expression, Func<string, bool> matchesTerm)
     {
@@ -267,32 +270,54 @@ public static class SearchExpressionMatcher
             return result && IsEnd;
         }
 
+        // +（或，优先级最低）
         private bool ParseOr()
+        {
+            var result = ParseDifference();
+            while (true)
+            {
+                SkipWhiteSpace();
+                if (!IsOrOperator(Current))
+                {
+                    return result;
+                }
+
+                _position++;
+                result = ParseDifference() || result;
+            }
+        }
+
+        // -（差集，左结合）：a-b 等价于 a 且非 b；a-b-c 等价于 a 且非 b 且非 c
+        private bool ParseDifference()
         {
             var result = ParseAnd();
             while (true)
             {
                 SkipWhiteSpace();
-                if (!Consume('|'))
+                if (!IsMinusOperator(Current))
                 {
                     return result;
                 }
 
-                result = ParseAnd() || result;
+                _position++;
+                var excluded = ParseAnd();
+                result = result && !excluded;
             }
         }
 
+        // *（与，优先级最高的二元运算）
         private bool ParseAnd()
         {
             var result = ParseNot();
             while (true)
             {
                 SkipWhiteSpace();
-                if (!Consume('&'))
+                if (!IsAndOperator(Current))
                 {
                     return result;
                 }
 
+                _position++;
                 result = ParseNot() && result;
             }
         }
@@ -301,9 +326,10 @@ public static class SearchExpressionMatcher
         {
             SkipWhiteSpace();
             var negate = false;
-            while (Consume('!') || Consume('！'))
+            while (CurrentIs('!') || CurrentIs('！'))
             {
                 negate = !negate;
+                _position++;
                 SkipWhiteSpace();
             }
 
@@ -314,11 +340,16 @@ public static class SearchExpressionMatcher
         private bool ParsePrimary()
         {
             SkipWhiteSpace();
-            if (Consume('(') || Consume('（'))
+            if (CurrentIs('(') || CurrentIs('（'))
             {
+                _position++;
                 var value = ParseOr();
                 SkipWhiteSpace();
-                _ = Consume(')') || Consume('）');
+                if (CurrentIs(')') || CurrentIs('）'))
+                {
+                    _position++;
+                }
+
                 return value;
             }
 
@@ -345,24 +376,18 @@ public static class SearchExpressionMatcher
             }
         }
 
-        private bool Consume(char value)
-        {
-            if (IsEnd || Current != value)
-            {
-                return false;
-            }
-
-            _position++;
-            return true;
-        }
+        private bool CurrentIs(char value) => !IsEnd && Current == value;
 
         private bool IsEnd => _position >= _text.Length;
 
-        private char Current => _text[_position];
+        private char Current => IsEnd ? '\0' : _text[_position];
 
-        private static bool IsOperator(char value)
-        {
-            return OperatorChars.Contains(value);
-        }
+        private static bool IsOperator(char value) => OperatorChars.Contains(value);
+
+        private static bool IsOrOperator(char value) => value is '+' or '＋' or '|';
+
+        private static bool IsAndOperator(char value) => value is '*' or '＊' or '&';
+
+        private static bool IsMinusOperator(char value) => value is '-' or '－';
     }
 }
