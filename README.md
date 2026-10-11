@@ -9,7 +9,7 @@
 [![Runtime](https://img.shields.io/badge/.NET-8%20self--contained-8A2BE2)](https://github.com/Junmst/UsageTracker/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](#-许可证)
 
-### [⬇️ 点击下载最新版（解压即用）](https://github.com/Junmst/UsageTracker/releases/download/v4.0.0/UT-v4.0.0-win-x64.zip)
+### [⬇️ 点击下载最新版（解压即用）](https://github.com/Junmst/UsageTracker/releases/download/v4.1.0/UT-v4.1.0-win-x64.zip)
 
 <img src="docs/screenshots/overview.png" width="100%" alt="总览页 —— 每日使用节奏与应用排行"/>
 
