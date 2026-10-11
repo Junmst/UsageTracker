@@ -86,18 +86,67 @@ public sealed class ReadOnlyStore
         var settings = _settingsReader.Load();
         var definitions = ConvertDefinitions(settings.SubjectDefinitions);
         var rules = settings.SubjectKeywordRules ?? new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        var manual = settings.ManualSubjects ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var scopes = BuildManualScopes(settings.ManualSubjectScopes, settings.ManualSubjects);
         foreach (var session in sessions)
         {
-            session.ManualSubject = ClassificationResolver.Resolve(
+            // 按每条记录自身的开始时间解析：当日模式的分类修改不追溯影响更早的历史记录。
+            var resolution = ClassificationResolver.ResolveDetailedAt(
                 session.ProcessName,
                 session.WindowTitle,
                 definitions,
                 rules,
-                manual,
+                scopes,
+                session.StartTime,
                 session.ManualSubject);
+            session.ManualSubject = resolution.Subject;
+            session.SubjectSource = resolution.Source;
+            session.MatchedKeywordRule = resolution.MatchedRule;
         }
         return sessions;
+    }
+
+    // 合并时间线与旧版 flat 字典：时间线为权威数据，flat 中存在而时间线没有的 key
+    // 按“有史以来生效”（DateTime.MinValue 节点）兜底，兼容旧版 settings.json。
+    private static Dictionary<string, List<ManualSubjectScope>> BuildManualScopes(
+        Dictionary<string, List<ManualSubjectScope>>? scopes,
+        Dictionary<string, string>? flat)
+    {
+        var merged = new Dictionary<string, List<ManualSubjectScope>>(StringComparer.OrdinalIgnoreCase);
+        if (flat is not null)
+        {
+            foreach (var pair in flat)
+            {
+                if (string.IsNullOrWhiteSpace(pair.Key)
+                    || string.IsNullOrWhiteSpace(pair.Value)
+                    || pair.Value == ClassificationResolver.EmptySubjectMarker)
+                {
+                    continue;
+                }
+
+                merged[pair.Key] = new List<ManualSubjectScope>
+                {
+                    new(DateTime.MinValue, pair.Value),
+                };
+            }
+        }
+
+        if (scopes is not null)
+        {
+            foreach (var pair in scopes)
+            {
+                if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is not { Count: > 0 })
+                {
+                    continue;
+                }
+
+                merged[pair.Key] = pair.Value
+                    .Where(scope => scope is not null)
+                    .OrderBy(scope => scope.EffectiveFrom)
+                    .ToList();
+            }
+        }
+
+        return merged;
     }
 
     private static List<SubjectDefinition> ConvertDefinitions(List<SubjectDefinitionDto>? definitions)
@@ -181,16 +230,50 @@ public sealed class ReadOnlyStore
     public List<BucketStatDto> GetProcessStats(DateTime start, DateTime end, Func<SessionDto, bool>? filter = null)
     {
         var sessions = GetSessionsIntersecting(start, end, filter);
-        return sessions
-            .GroupBy(x => string.IsNullOrWhiteSpace(x.ProcessName) ? "未知" : x.ProcessName,
-                     StringComparer.OrdinalIgnoreCase)
-            .Select(g => new BucketStatDto
+        var buckets = new Dictionary<string, BucketStatDto>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var session in sessions)
+        {
+            var key = string.IsNullOrWhiteSpace(session.ProcessName) ? "未知" : session.ProcessName;
+            if (!buckets.TryGetValue(key, out var bucket))
             {
-                Key = g.Key,
-                Seconds = SumSeconds(g, start, end),
-                SessionCount = g.Count()
-            })
-            .OrderByDescending(x => x.Seconds)
+                bucket = new BucketStatDto { Key = key };
+                buckets[key] = bucket;
+            }
+
+            var overlap = UsageTimeRange.GetOverlapDuration(session.StartTime, session.EndTime, start, end);
+            bucket.Seconds += overlap.TotalSeconds;
+            bucket.SessionCount++;
+
+            // 后台并行：把该记录携带的各白名单媒体 observedSeconds，按会话与查询范围的重叠比例裁剪后，
+            // 汇总到对应进程名下（与前台时长合并到同一行）。并行秒数不进入总使用时长，避免与前台重复。
+            var sessionTotal = (session.EndTime ?? DateTime.Now) - session.StartTime;
+            if (sessionTotal.TotalSeconds <= 0 || overlap.TotalSeconds <= 0)
+            {
+                continue;
+            }
+
+            var ratio = overlap.TotalSeconds / sessionTotal.TotalSeconds;
+            foreach (var activity in session.ParallelActivities)
+            {
+                if (string.IsNullOrWhiteSpace(activity.ProcessName) || activity.ObservedSeconds <= 0)
+                {
+                    continue;
+                }
+
+                if (!buckets.TryGetValue(activity.ProcessName, out var parallelBucket))
+                {
+                    parallelBucket = new BucketStatDto { Key = activity.ProcessName };
+                    buckets[activity.ProcessName] = parallelBucket;
+                }
+
+                parallelBucket.ParallelSeconds += activity.ObservedSeconds * ratio;
+            }
+        }
+
+        // 排名按“前台 + 后台并行”的总活跃时长，让长期后台播放的进程也能出现在它应有的位置。
+        return buckets.Values
+            .OrderByDescending(x => x.Seconds + x.ParallelSeconds)
             .ToList();
     }
 

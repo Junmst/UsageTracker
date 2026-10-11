@@ -135,7 +135,12 @@ export default function StatsPage({ kind, date, theme }: Props) {
     };
   }, [kind, date, autoReloadToken]);
 
-  const maxSeconds = useMemo(() => Math.max(1, ...rows.map((x) => x.seconds)), [rows]);
+  // 条形与排名按“前台 + 后台并行”总活跃时长归一；顶部总使用时长仍只统计前台 seconds
+  const maxSeconds = useMemo(() => Math.max(1, ...rows.map((x) => x.seconds + (x.parallelSeconds ?? 0))), [rows]);
+  const totalParallelSeconds = useMemo(
+    () => rows.reduce((total, row) => total + (row.parallelSeconds ?? 0), 0),
+    [rows]
+  );
   const maxTreeSeconds = useMemo(() => Math.max(1, ...tree.map((x) => x.seconds)), [tree]);
   const totalSeconds = useMemo(
     () => rows.reduce((total, row) => total + row.seconds, 0),
@@ -183,10 +188,14 @@ export default function StatsPage({ kind, date, theme }: Props) {
         {kind === 'process' ? (
         <div className="panel stat-list">
           <div className="list-caption">
-            <span>应用使用排行</span>
+            <span>应用使用排行{totalParallelSeconds > 0 && <span className="list-caption-note">（浅色段为后台并行播放，不计入总时长）</span>}</span>
             <span>时长 / 会话</span>
           </div>
-          {rows.map((row, index) => (
+          {rows.map((row, index) => {
+            const parallelSeconds = row.parallelSeconds ?? 0;
+            const foregroundWidth = Math.min(100, (row.seconds / maxSeconds) * 100);
+            const parallelWidth = Math.min(100 - foregroundWidth, (parallelSeconds / maxSeconds) * 100);
+            return (
             <div className="stat-row" key={row.key}>
               <span className={`stat-rank rank-${Math.min(index + 1, 4)}`}>
                 {String(index + 1).padStart(2, '0')}
@@ -194,19 +203,32 @@ export default function StatsPage({ kind, date, theme }: Props) {
               <span className="stat-app-mark">{row.key.trim().slice(0, 1).toUpperCase() || '·'}</span>
               <div className="stat-row-main">
                 <div className="stat-row-top">
-                  <span className="stat-row-name" title={row.key}>{row.key}</span>
-                  <span className="stat-row-value">{formatHoursMinutes(row.seconds)}</span>
+                  <span className="stat-row-name" title={row.key}>
+                    {row.key}
+                    {parallelSeconds > 0 && <span className="parallel-badge stat-parallel-badge" title="该进程在其他前台记录期间后台并行播放">并行</span>}
+                  </span>
+                  <span className="stat-row-value">
+                    {row.seconds > 0 ? formatHoursMinutes(row.seconds) : <span className="stat-value-empty">无前台</span>}
+                    {parallelSeconds > 0 && <span className="stat-parallel-value" title="后台并行播放累计（不计入总时长）">+ 并行 {formatHoursMinutes(parallelSeconds)}</span>}
+                  </span>
                 </div>
                 <div className="progress-track">
                   <div
                     className="progress-fill"
-                    style={{ width: `${Math.min(100, (row.seconds / maxSeconds) * 100)}%` }}
+                    style={{ width: `${foregroundWidth}%` }}
                   />
+                  {parallelWidth > 0 && (
+                    <div
+                      className="progress-fill progress-fill-parallel"
+                      style={{ width: `${parallelWidth}%` }}
+                    />
+                  )}
                 </div>
               </div>
-              <span className="stat-row-count">{row.sessionCount} 次</span>
+              <span className="stat-row-count">{row.sessionCount > 0 ? `${row.sessionCount} 次` : '后台'}</span>
             </div>
-          ))}
+            );
+          })}
           {rows.length === 0 && <div className="loading">该日期没有记录</div>}
         </div>
       ) : (

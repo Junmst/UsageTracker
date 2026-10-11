@@ -18,6 +18,9 @@ namespace UsageTrackerNative;
 [JsonSerializable(typeof(SubjectParentDefinition))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(Dictionary<string, List<string>>))]
+[JsonSerializable(typeof(ManualSubjectScope))]
+[JsonSerializable(typeof(List<ManualSubjectScope>))]
+[JsonSerializable(typeof(Dictionary<string, List<ManualSubjectScope>>))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(List<ParallelActivitySnapshot>))]
 [JsonSerializable(typeof(List<UsageSessionRecord>))]
@@ -70,6 +73,9 @@ public sealed class UsageTrackerService : IDisposable
     private readonly ConcurrentDictionary<string, UsageSessionRecord> _sessionById = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, UsageSessionRecord> _dirtyRecords = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _manualSubjects = new(StringComparer.OrdinalIgnoreCase);
+    // 手动分类时间线（权威存储）：key=进程|窗口标题，值=按生效时间升序的节点列表。
+    // _manualSubjects 只是其“当前生效值”的派生缓存，供新记录落库等场景使用，二者必须同步维护。
+    private readonly Dictionary<string, List<ManualSubjectScope>> _manualSubjectScopes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ParallelAudioStabilityState> _parallelAudioStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<string>> _subjectKeywordRules = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<SubjectDefinition> _subjectDefinitions = new();
@@ -77,7 +83,10 @@ public sealed class UsageTrackerService : IDisposable
     private readonly List<string> _themeAccentSlots = ["#ED0012", "#2563EB", "#16A34A"];
     private readonly List<string> _parallelActivityWhitelistProcesses = DefaultParallelActivityWhitelistProcesses();
     private UsageSessionRecord? _activeRecord;
-    private ParallelActivitySnapshot? _lastParallelActivitySnapshot;
+    // 当前前台会话内的后台媒体并行累计：白名单进程名 -> 本会话去抖通过后的有声秒数（支持多进程同时存在）。
+    // 音乐在会话中途停止只停止后续累加，已累计值保留到会话关闭落库，避免“只记最后一拍”丢失整段并行历史。
+    private readonly Dictionary<string, double> _sessionParallelSeconds = new(StringComparer.OrdinalIgnoreCase);
+    private DateTime _sessionParallelLastTickAt;
     private DateTime _lastParallelAudioStateLogAt = DateTime.MinValue;
     private DateTime? _lastCaptureTime;
     private bool _isDisposed;
@@ -108,12 +117,17 @@ public sealed class UsageTrackerService : IDisposable
     private DateTime? _idleAwaitingClickStartedAt;
     private bool _manualIdleRequested;
     private bool _wasMouseButtonDown;
+    // 空闲期间的光标位置基线：用于识别数位板书写等指针移动（部分笔驱动不更新 GetLastInputInfo，但会移动系统光标）
+    private CursorPoint? _idleLastCursorPos;
     private volatile bool _isForegroundVideoPlayback;
     private bool _lastVideoDetected;
     private DateTime _lastForegroundVideoAt;
     public event EventHandler<SessionChangedEventArgs>? SessionChanged;
     public UsageSession? ActiveSession => _activeRecord is null ? null : ToActiveSession(_activeRecord, DateTime.Now, ResolveSubjectForDisplay(_activeRecord));
     public int IdleTimeoutMinutes { get; private set; } = DefaultIdleTimeoutMinutes;
+    public const double DefaultCompactWindowOpacity = 1.0;
+    // 桌面悬浮小窗背景不透明度（仅背景），缺省完全不透明。
+    public double CompactWindowOpacity { get; private set; } = DefaultCompactWindowOpacity;
     public string ManualIdleShortcutText { get; private set; } = DefaultManualIdleShortcutText;
     public SubjectDeleteBehavior SubjectDeleteBehavior { get; private set; } = SubjectDeleteBehavior.MatchRules;
     public int DataRetentionDays => MaxDataRetentionDays;
@@ -382,6 +396,38 @@ public sealed class UsageTrackerService : IDisposable
         return removed;
     }
 
+    public bool RenameParallelActivityWhitelistProcess(string oldProcess, string newProcess, out string? reason)
+    {
+        var oldNormalized = NormalizeProcessName(oldProcess);
+        var newNormalized = NormalizeProcessName(newProcess);
+        if (string.IsNullOrWhiteSpace(newNormalized))
+        {
+            reason = "进程名不能为空";
+            return false;
+        }
+        if (string.Equals(oldNormalized, newNormalized, StringComparison.OrdinalIgnoreCase))
+        {
+            reason = "新进程名与原进程名相同";
+            return false;
+        }
+        var oldIndex = _parallelActivityWhitelistProcesses.FindIndex(x => string.Equals(x, oldNormalized, StringComparison.OrdinalIgnoreCase));
+        if (oldIndex < 0)
+        {
+            reason = $"进程「{oldNormalized}」不在白名单中，可能已被修改，请刷新后重试";
+            return false;
+        }
+        if (_parallelActivityWhitelistProcesses.Contains(newNormalized, StringComparer.OrdinalIgnoreCase))
+        {
+            reason = $"进程「{newNormalized}」已在白名单中，请勿重复添加";
+            return false;
+        }
+        _parallelActivityWhitelistProcesses[oldIndex] = newNormalized;
+        _parallelActivityWhitelistProcesses.Sort(StringComparer.OrdinalIgnoreCase);
+        SaveState();
+        reason = null;
+        return true;
+    }
+
     private bool IsParallelActivityWhitelisted(string processName)
     {
         var normalized = NormalizeProcessName(processName);
@@ -407,6 +453,12 @@ public sealed class UsageTrackerService : IDisposable
         IdleTimeoutMinutes = NormalizeIdleTimeoutMinutes(minutes);
         SaveIdleTimeoutImmediately();
         NativeStartupLog.LogStartupMessage("IdleTimeout.Save", $"saved '{IdleTimeoutMinutes}' to settings.json");
+    }
+    public void SetCompactWindowOpacity(double opacity)
+    {
+        CompactWindowOpacity = NormalizeCompactWindowOpacity(opacity);
+        SaveCompactWindowOpacityImmediately();
+        NativeStartupLog.LogStartupMessage("CompactWindowOpacity.Save", $"saved '{CompactWindowOpacity:0.##}' to settings.json");
     }
     public void SetManualIdleShortcutText(string shortcutText)
     {
@@ -446,6 +498,11 @@ public sealed class UsageTrackerService : IDisposable
     private static int NormalizeIdleTimeoutMinutes(int minutes)
     {
         return Math.Clamp(minutes, 1, 1440);
+    }
+    private static double NormalizeCompactWindowOpacity(double opacity)
+    {
+        // 允许 0：此时小窗背景/边框/阴影全部消失，仅保留文字与状态灯。
+        return Math.Round(Math.Clamp(opacity, 0.0, 1.0), 2);
     }
     public void Start()
     {
@@ -954,6 +1011,52 @@ public sealed class UsageTrackerService : IDisposable
         RaiseChanged(null, ActiveSession);
         return true;
     }
+
+    public bool RenameSubjectKeywordRule(string subject, string oldKeyword, string newKeyword, out string? reason)
+    {
+        ReloadSubjectDefinitionsFromSettingsFile();
+        oldKeyword = oldKeyword.Trim();
+        newKeyword = newKeyword.Trim();
+        if (string.IsNullOrWhiteSpace(newKeyword))
+        {
+            reason = "关键词不能为空";
+            return false;
+        }
+        if (string.Equals(oldKeyword, newKeyword, StringComparison.OrdinalIgnoreCase))
+        {
+            reason = "新关键词与原关键词相同";
+            return false;
+        }
+        if (!SubjectExists(subject))
+        {
+            reason = $"分类「{subject}」不存在，可能已被修改，请刷新后重试";
+            return false;
+        }
+        if (!_subjectKeywordRules.TryGetValue(subject, out var keywords))
+        {
+            reason = $"分类「{subject}」暂无关键词规则";
+            return false;
+        }
+        var oldIndex = keywords.FindIndex(x => string.Equals(x, oldKeyword, StringComparison.OrdinalIgnoreCase));
+        if (oldIndex < 0)
+        {
+            reason = $"关键词「{oldKeyword}」不存在，可能已被修改，请刷新后重试";
+            return false;
+        }
+        if (keywords.Any(x => string.Equals(x, newKeyword, StringComparison.OrdinalIgnoreCase)))
+        {
+            reason = $"关键词「{newKeyword}」已存在，请勿重复添加";
+            return false;
+        }
+        keywords[oldIndex] = newKeyword;
+        RemoveInvalidKeywordRules();
+        RefreshTodayUnmanualSnapshots();
+        SaveSubjectKeywordRulesImmediately();
+        SaveState();
+        RaiseChanged(null, ActiveSession);
+        reason = null;
+        return true;
+    }
     public bool IsStartWithWindowsEnabled()
     {
         try
@@ -1325,7 +1428,7 @@ public sealed class UsageTrackerService : IDisposable
                 imported++;
             }
 
-            MergeManualSubjects(incoming.ManualSubjects);
+            MergeManualSubjects(incoming.ManualSubjects, incoming.ManualSubjectScopes);
         }
 
         if (importSettings)
@@ -1357,17 +1460,7 @@ public sealed class UsageTrackerService : IDisposable
         {
             _activeRecord.EnsureId();
         }
-        _manualSubjects.Clear();
-        foreach (var pair in incoming.ManualSubjects ?? new Dictionary<string, string>())
-        {
-            // 旧版“空分类”标记不再保留：置空即无手动覆盖，应重新接受关键词匹配
-            if (!string.IsNullOrWhiteSpace(pair.Key)
-                && !string.IsNullOrWhiteSpace(pair.Value)
-                && pair.Value != ClassificationResolver.EmptySubjectMarker)
-            {
-                _manualSubjects[pair.Key] = pair.Value;
-            }
-        }
+        ReplaceManualSubjectState(incoming.ManualSubjects, incoming.ManualSubjectScopes);
 
         _repository.WriteStateToDisk(CreateStateSnapshot());
         return new ImportResult(incomingRecords.Count, 0, incomingRecords.Count, 0, backupPath);
@@ -1432,6 +1525,10 @@ public sealed class UsageTrackerService : IDisposable
         {
             IdleTimeoutMinutes = NormalizeIdleTimeoutMinutes(idleTimeoutMinutes);
         }
+        if (incoming.CompactWindowOpacity is { } incomingCompactOpacity)
+        {
+            CompactWindowOpacity = NormalizeCompactWindowOpacity(incomingCompactOpacity);
+        }
         if (!string.IsNullOrWhiteSpace(incoming.ManualIdleShortcutText))
         {
             ManualIdleShortcutText = incoming.ManualIdleShortcutText.Trim();
@@ -1450,12 +1547,13 @@ public sealed class UsageTrackerService : IDisposable
             if (mode == ImportSettingsMode.Replace)
             {
                 _manualSubjects.Clear();
+                _manualSubjectScopes.Clear();
                 _subjectKeywordRules.Clear();
                 _subjectDefinitions.Clear();
             }
 
             changed += CountSettingsRules(incoming);
-            MergeManualSubjects(incoming.ManualSubjects);
+            MergeManualSubjects(incoming.ManualSubjects, incoming.ManualSubjectScopes);
             MergeSubjectKeywordRules(incoming.SubjectKeywordRules);
             MergeSubjectDefinitions(incoming.SubjectDefinitions, incoming.SubjectOptions);
             RemoveInvalidKeywordRules();
@@ -1578,6 +1676,7 @@ public sealed class UsageTrackerService : IDisposable
         target.ThemeAccentColor = settings.ThemeAccentColor;
         target.ThemeAccentRecentColors = settings.ThemeAccentRecentColors;
         target.IdleTimeoutMinutes = settings.IdleTimeoutMinutes;
+        target.CompactWindowOpacity = settings.CompactWindowOpacity;
         target.ManualIdleShortcutText = settings.ManualIdleShortcutText;
         target.SubjectDeleteBehavior = settings.SubjectDeleteBehavior;
     }
@@ -1661,18 +1760,11 @@ public sealed class UsageTrackerService : IDisposable
     public void SetManualSubjectScope(UsageSession session, string? manualSubject, DateTime? targetDate)
     {
         var normalizedSubject = ClassificationResolver.NormalizeSubject(manualSubject);
+        var classificationKey = BuildClassificationKey(session.ProcessName, session.WindowTitle);
         if (targetDate is null)
         {
-            var classificationKey = BuildClassificationKey(session.ProcessName, session.WindowTitle);
-            if (string.IsNullOrWhiteSpace(normalizedSubject))
-            {
-                // 置空 = 删除手动标记，使该进程+标题重新接受关键词自动分类
-                _manualSubjects.Remove(classificationKey);
-            }
-            else
-            {
-                _manualSubjects[classificationKey] = normalizedSubject;
-            }
+            // 全历史：整条时间线收敛为“有史以来”单一节点（置空则彻底删除），所有记录一并重算。
+            ApplyGlobalManualSubject(classificationKey, normalizedSubject);
             foreach (var record in _history.Where(record => SessionMatches(record, session.ProcessName, session.WindowTitle)))
             {
                 record.ManualSubject = normalizedSubject
@@ -1692,43 +1784,37 @@ public sealed class UsageTrackerService : IDisposable
         var date = targetDate.Date;
         var classificationKey = BuildClassificationKey(session.ProcessName, session.WindowTitle);
         var normalizedSubject = ClassificationResolver.NormalizeSubject(manualSubject);
-        if (!string.Equals(session.ProcessName, "时迹", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(session.ProcessName, "时迹.exe", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(session.ProcessName, "UsageTrackerNative", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(session.ProcessName, "UsageTrackerNative.exe", StringComparison.OrdinalIgnoreCase))
+        var isTrackerProcess = string.Equals(session.ProcessName, "时迹", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(session.ProcessName, "时迹.exe", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(session.ProcessName, "UsageTrackerNative", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(session.ProcessName, "UsageTrackerNative.exe", StringComparison.OrdinalIgnoreCase);
+        if (!isTrackerProcess)
         {
-            if (string.IsNullOrWhiteSpace(normalizedSubject))
-            {
-                // 置空 = 删除手动标记，使该进程+标题重新接受关键词自动分类
-                _manualSubjects.Remove(classificationKey);
-            }
-            else
-            {
-                _manualSubjects[classificationKey] = normalizedSubject;
-            }
+            // 当日模式：只在时间线上写入“当日 04:00 起生效”的节点，当日之前的历史不受影响。
+            ApplyScopedManualSubject(classificationKey, normalizedSubject, UsageTimeRange.GetDayStart(date));
             _settingsDirty = true;
         }
         // 置空后立即按关键词重新归类：命中关键词则归入对应分类，都不命中才留空（前台显示空分类）
         var effectiveSubject = normalizedSubject
             ?? MatchSubjectByKeyword(session.ProcessName, session.WindowTitle);
-        // 分类按“进程 + 窗口标题”生效：同一进程和窗口名称的全部记录一起更新。
+        // 分类按“进程 + 窗口标题”生效：只重写当日（含）以后的记录。按记录开始时间归属业务日，
+        // 早于当日 04:00 的历史行一条都不动（历史快照语义）。
         var dayStart = UsageTimeRange.GetDayStart(date);
-        var dayEnd = dayStart.AddDays(1);
         var updatedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var record in _history.Where(record => InDay(record, dayStart, dayEnd) && SessionMatches(record, session.ProcessName, session.WindowTitle)))
+        foreach (var record in _history.Where(record => record.StartTime >= dayStart && SessionMatches(record, session.ProcessName, session.WindowTitle)))
         {
             ApplySubjectToRecord(record, effectiveSubject, updatedIds);
         }
-        foreach (var record in _repository.GetSessionsByDate(date)
-            .Where(record => SessionMatches(record, session.ProcessName, session.WindowTitle) && !updatedIds.Contains(record.Id)))
+        foreach (var record in _repository.GetSessionsInRange(dayStart, DateTime.MaxValue)
+            .Where(record => record.StartTime >= dayStart && SessionMatches(record, session.ProcessName, session.WindowTitle) && !updatedIds.Contains(record.Id)))
         {
             ApplySubjectToRecord(record, effectiveSubject, updatedIds);
         }
-        // 兜底：内存与当日查询都没有命中时，仍按单条记录更新，避免界面点击无效果。
+        // 兜底：内存与范围查询都没有命中时，仍按点击的单条记录更新，避免界面点击无效果。
         if (updatedIds.Count == 0)
         {
             var dbRecord = _repository.GetRecordById(session.Id);
-            if (dbRecord is not null)
+            if (dbRecord is not null && dbRecord.StartTime >= dayStart)
             {
                 ApplySubjectToRecord(dbRecord, effectiveSubject, updatedIds);
             }
@@ -1741,10 +1827,258 @@ public sealed class UsageTrackerService : IDisposable
         SaveState();
     }
 
-    private static bool InDay(UsageSessionRecord record, DateTime dayStart, DateTime dayEnd)
+    // ── 手动分类时间线（ManualSubjectScopes）──────────────────────────────
+    // 统一加载入口：scopes 为权威数据；旧版 flat 字典里有而 scopes 没有的 key
+    // 按“有史以来生效”（DateTime.MinValue 节点）迁移，升级前后表现完全一致。
+    // 返回 true 表示发现并静默清理了旧版空分类标记/旧版“未分类”文案。
+    private bool ReplaceManualSubjectState(
+        IReadOnlyDictionary<string, string>? flat,
+        IReadOnlyDictionary<string, List<ManualSubjectScope>>? scopes)
     {
-        var end = record.EndTime ?? DateTime.Now;
-        return record.StartTime < dayEnd && end > dayStart;
+        var migratedLegacy = false;
+        _manualSubjectScopes.Clear();
+        _manualSubjects.Clear();
+
+        if (scopes is not null)
+        {
+            foreach (var pair in scopes)
+            {
+                if (string.IsNullOrWhiteSpace(pair.Key))
+                {
+                    continue;
+                }
+                if (pair.Value is { Count: > 0 } && pair.Value.Exists(scope => scope is not null
+                    && (scope.Subject == ClassificationResolver.EmptySubjectMarker
+                        || (scope.Subject is { } legacy && string.Equals(legacy, LegacyAutoUnclassifiedLabel, StringComparison.OrdinalIgnoreCase)))))
+                {
+                    migratedLegacy = true;
+                }
+                var timeline = NormalizeScopeTimeline(pair.Value);
+                if (timeline.Count > 0)
+                {
+                    _manualSubjectScopes[pair.Key] = timeline;
+                }
+            }
+        }
+
+        if (flat is not null)
+        {
+            foreach (var pair in flat)
+            {
+                if (string.IsNullOrWhiteSpace(pair.Key))
+                {
+                    continue;
+                }
+                if (pair.Value == ClassificationResolver.EmptySubjectMarker
+                    || string.Equals(pair.Value, LegacyAutoUnclassifiedLabel, StringComparison.OrdinalIgnoreCase))
+                {
+                    migratedLegacy = true;
+                }
+                if (_manualSubjectScopes.ContainsKey(pair.Key))
+                {
+                    continue;
+                }
+                var migrated = NormalizeManualValue(pair.Value);
+                if (migrated is null)
+                {
+                    continue; // 旧 flat 不持久化清除节点，空值无需迁移
+                }
+                _manualSubjectScopes[pair.Key] = [new ManualSubjectScope(DateTime.MinValue, migrated)];
+            }
+        }
+
+        RebuildFlatManualSubjects();
+        return migratedLegacy;
+    }
+
+    private void ApplyGlobalManualSubject(string key, string? normalizedSubject)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedSubject))
+        {
+            _manualSubjectScopes.Remove(key);
+            _manualSubjects.Remove(key);
+        }
+        else
+        {
+            _manualSubjectScopes[key] = [new ManualSubjectScope(DateTime.MinValue, normalizedSubject)];
+            _manualSubjects[key] = normalizedSubject;
+        }
+    }
+
+    // 在时间线上写入“dayStart 起生效”的节点：先删除 >= dayStart 的旧节点再追加，
+    // 更早的节点保持原样，因此本次修改不会追溯影响当日之前的历史记录。
+    private void ApplyScopedManualSubject(string key, string? normalizedSubject, DateTime dayStart)
+    {
+        List<ManualSubjectScope> timeline;
+        if (_manualSubjectScopes.TryGetValue(key, out var existing) && existing is { Count: > 0 })
+        {
+            timeline = [.. existing];
+        }
+        else
+        {
+            // 时间线缺失但 flat 里有值（旧版数据/外部写入）：先补一个“有史以来”节点托底
+            timeline = [];
+            if (_manualSubjects.TryGetValue(key, out var legacy) && !string.IsNullOrWhiteSpace(legacy))
+            {
+                timeline.Add(new ManualSubjectScope(DateTime.MinValue, legacy));
+            }
+        }
+
+        timeline.RemoveAll(scope => scope.EffectiveFrom >= dayStart);
+        if (normalizedSubject is not null)
+        {
+            if (timeline.Count == 0 || !string.Equals(timeline[^1].Subject, normalizedSubject, StringComparison.Ordinal))
+            {
+                timeline.Add(new ManualSubjectScope(dayStart, normalizedSubject));
+            }
+        }
+        else if (timeline.Count > 0 && timeline[^1].Subject is not null)
+        {
+            // 之前存在手动分类：保留历史，在当日插入“显式清除”节点，当日起回落关键词匹配
+            timeline.Add(new ManualSubjectScope(dayStart, null));
+        }
+
+        var normalized = NormalizeScopeTimeline(timeline);
+        if (normalized.Count == 0)
+        {
+            _manualSubjectScopes.Remove(key);
+        }
+        else
+        {
+            _manualSubjectScopes[key] = normalized;
+        }
+        RebuildFlatManualSubjects();
+    }
+
+    // 分类被重命名时，时间线内所有引用旧分类名的节点一并改名。
+    private void RenameManualScopes(string oldSubject, string newSubject)
+    {
+        foreach (var key in _manualSubjectScopes.Keys.ToList())
+        {
+            var timeline = _manualSubjectScopes[key];
+            var changed = false;
+            for (var i = 0; i < timeline.Count; i++)
+            {
+                if (timeline[i].Subject is { } subject && string.Equals(subject, oldSubject, StringComparison.OrdinalIgnoreCase))
+                {
+                    timeline[i] = timeline[i] with { Subject = newSubject };
+                    changed = true;
+                }
+            }
+            if (changed)
+            {
+                var normalized = NormalizeScopeTimeline(timeline);
+                if (normalized.Count == 0)
+                {
+                    _manualSubjectScopes.Remove(key);
+                }
+                else
+                {
+                    _manualSubjectScopes[key] = normalized;
+                }
+            }
+        }
+        RebuildFlatManualSubjects();
+    }
+
+    // 分类被删除时：当前生效值属于被删分类的整条时间线作废（删除分类是全局操作，
+    // 与既有 flat 删除语义一致），相关记录由调用方按关键词/提升分类重写快照。
+    private void RemoveManualScopesForCurrentSubjects(HashSet<string> subjectSet)
+    {
+        foreach (var key in _manualSubjectScopes.Keys.ToList())
+        {
+            var timeline = _manualSubjectScopes[key];
+            if (timeline.Count > 0
+                && timeline[^1].Subject is { } current
+                && subjectSet.Contains(current))
+            {
+                _manualSubjectScopes.Remove(key);
+            }
+        }
+        RebuildFlatManualSubjects();
+    }
+
+    private void RebuildFlatManualSubjects()
+    {
+        _manualSubjects.Clear();
+        foreach (var pair in _manualSubjectScopes)
+        {
+            if (pair.Value.Count == 0)
+            {
+                continue;
+            }
+            var latest = pair.Value[^1].Subject;
+            if (!string.IsNullOrWhiteSpace(latest))
+            {
+                _manualSubjects[pair.Key] = latest!;
+            }
+        }
+    }
+
+    private Dictionary<string, List<ManualSubjectScope>> SnapshotManualSubjectScopes()
+    {
+        var snapshot = new Dictionary<string, List<ManualSubjectScope>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in _manualSubjectScopes)
+        {
+            snapshot[pair.Key] = [.. pair.Value];
+        }
+        return snapshot;
+    }
+
+    private string? ResolveSubjectAtTime(string processName, string windowTitle, DateTime at, string? storedSubject)
+    {
+        return ClassificationResolver.ResolveAt(
+            processName,
+            windowTitle,
+            _subjectDefinitions,
+            _subjectKeywordRules,
+            _manualSubjectScopes,
+            at,
+            storedSubject);
+    }
+
+    private static string? NormalizeManualValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value == ClassificationResolver.EmptySubjectMarker)
+        {
+            return null;
+        }
+        return string.Equals(value, LegacyAutoUnclassifiedLabel, StringComparison.OrdinalIgnoreCase)
+            ? ManualUnclassifiedLabel
+            : ClassificationResolver.NormalizeSubject(value);
+    }
+
+    private static List<ManualSubjectScope> NormalizeScopeTimeline(IEnumerable<ManualSubjectScope>? scopes)
+    {
+        var ordered = (scopes ?? [])
+            .Where(scope => scope is not null)
+            .Select(scope =>
+            {
+                var effectiveFrom = scope.EffectiveFrom.Kind == DateTimeKind.Local
+                    ? DateTime.SpecifyKind(scope.EffectiveFrom, DateTimeKind.Unspecified)
+                    : scope.EffectiveFrom;
+                return new ManualSubjectScope(effectiveFrom, NormalizeManualValue(scope.Subject));
+            })
+            .OrderBy(scope => scope.EffectiveFrom)
+            .ToList();
+
+        var deduped = new List<ManualSubjectScope>();
+        foreach (var scope in ordered)
+        {
+            if (deduped.Count > 0 && deduped[^1].EffectiveFrom == scope.EffectiveFrom)
+            {
+                deduped[^1] = scope; // 同一时刻重复写入：后者覆盖
+            }
+            else if (deduped.Count == 0 || !string.Equals(deduped[^1].Subject, scope.Subject, StringComparison.Ordinal))
+            {
+                deduped.Add(scope); // 与前一节点同值的冗余节点直接丢弃
+            }
+        }
+        while (deduped.Count > 0 && deduped[0].Subject is null)
+        {
+            deduped.RemoveAt(0); // 开头的“清除”节点没有历史意义
+        }
+        return deduped;
     }
 
     private void ApplySubjectToRecord(UsageSessionRecord record, string? subject, HashSet<string> updatedIds)
@@ -1771,7 +2105,6 @@ public sealed class UsageTrackerService : IDisposable
         if (_lastCaptureTime is { } lastCaptureTime && now - lastCaptureTime > SleepGapThreshold)
         {
             var closedForSleep = CloseActiveSession(lastCaptureTime);
-            _lastParallelActivitySnapshot = null;
             ResetForegroundVideoState();
             _lastCaptureTime = now;
             RaiseChanged(closedForSleep, null);
@@ -1808,7 +2141,6 @@ public sealed class UsageTrackerService : IDisposable
     {
         var pausedAt = _lastCaptureTime ?? DateTime.Now;
         var closed = CloseActiveSession(pausedAt);
-        _lastParallelActivitySnapshot = null;
         ResetForegroundVideoState();
         _lastCaptureTime = pausedAt;
         _pollTimer.Change(Timeout.Infinite, Timeout.Infinite);
@@ -1821,7 +2153,6 @@ public sealed class UsageTrackerService : IDisposable
         if (_lastCaptureTime is { } lastCaptureTime && now - lastCaptureTime > SleepGapThreshold)
         {
             closed = CloseActiveSession(lastCaptureTime);
-            _lastParallelActivitySnapshot = null;
         }
         _lastCaptureTime = now;
         if (!_isDisposed)
@@ -1905,7 +2236,7 @@ public sealed class UsageTrackerService : IDisposable
         _lastForegroundVideoAt = default;
     }
 
-    private IdleMediaProtectionDecision EvaluateIdleMediaProtection(WindowSnapshot snapshot, TimeSpan idleDuration, MediaPlaybackSnapshot playback)
+    private IdleMediaProtectionDecision EvaluateIdleMediaProtection(WindowSnapshot snapshot, TimeSpan idleDuration, MediaPlaybackSnapshot playback, IReadOnlyList<string> stableParallelProcesses)
     {
         // Video playback may expose neither an audio session nor fresh input events. Keep the foreground video surface recorded.
         // 注意：必须叠加"最近仍在播放"的条件，否则视频暂停后只要标题含 bilibili/哔哩就会一直保护，
@@ -1914,12 +2245,12 @@ public sealed class UsageTrackerService : IDisposable
         if (IsBilibiliSurface(snapshot)
             && (_isForegroundVideoPlayback || HasRecentForegroundAudio(snapshot, ForegroundVideoPlaybackGracePeriod)))
         {
-            return IdleMediaProtectionDecision.Protected("ForegroundBilibiliSurface", BuildParallelActivitySnapshot(playback, snapshot, idleDuration));
+            return IdleMediaProtectionDecision.Protected("ForegroundBilibiliSurface", CreateParallelSnapshot(stableParallelProcesses.FirstOrDefault(), idleDuration));
         }
 
         if (playback.HasAnyPlayback)
         {
-            var parallelActivity = BuildParallelActivitySnapshot(playback, snapshot, idleDuration);
+            var parallelActivity = CreateParallelSnapshot(stableParallelProcesses.FirstOrDefault(), idleDuration);
             if (IsForegroundAudioPlayback(snapshot, playback))
             {
                 MarkForegroundAudioAudible(snapshot);
@@ -2044,7 +2375,9 @@ public sealed class UsageTrackerService : IDisposable
         return playback.ActiveProcessNames.Any(IsParallelActivityWhitelisted);
     }
 
-    private ParallelActivitySnapshot? BuildParallelActivitySnapshot(MediaPlaybackSnapshot playback, WindowSnapshot snapshot, TimeSpan idleDuration)
+    // 推进白名单音频去抖状态机，返回当前一拍“稳定有声”的后台白名单进程（可多个；显式排除前台同名进程）。
+    // 注意：静默计数每拍只能计一次——旧实现有两个 foreach 重复计数，停止判定实际只花了阈值的一半拍数。
+    private IReadOnlyList<string> UpdateStableParallelProcesses(MediaPlaybackSnapshot playback, WindowSnapshot snapshot)
     {
         var foregroundProcessName = NormalizeProcessName(snapshot.ProcessName);
         var audibleProcessNames = playback.ActiveProcessNames
@@ -2052,20 +2385,6 @@ public sealed class UsageTrackerService : IDisposable
             .Where(x => !string.Equals(NormalizeProcessName(x), foregroundProcessName, StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (audibleProcessNames.Count == 0)
-        {
-            LogParallelAudioState(snapshot, playback, audibleProcessNames, null);
-            foreach (var processName in _parallelAudioStates.Keys.ToList())
-            {
-                var state = _parallelAudioStates[processName];
-                state.AudibleSamples = 0;
-                state.SilentSamples++;
-                if (state.SilentSamples >= ParallelAudioStopSampleThreshold)
-                {
-                    state.IsActiveParallel = false;
-                }
-            }
-        }
 
         foreach (var processName in _parallelAudioStates.Keys.ToList())
         {
@@ -2098,31 +2417,86 @@ public sealed class UsageTrackerService : IDisposable
             }
         }
 
-        var activeProcessName = _parallelAudioStates
+        var activeProcessNames = _parallelAudioStates
             .Where(x => x.Value.IsActiveParallel)
             .Select(x => x.Key)
-            .FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(activeProcessName))
+            .Where(x => !string.Equals(x, foregroundProcessName, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        LogParallelAudioState(snapshot, playback, audibleProcessNames, activeProcessNames.FirstOrDefault());
+        return activeProcessNames;
+    }
+
+    private static ParallelActivitySnapshot? CreateParallelSnapshot(string? processName, TimeSpan observedDuration)
+    {
+        if (string.IsNullOrWhiteSpace(processName))
         {
-            LogParallelAudioState(snapshot, playback, audibleProcessNames, null);
             return null;
         }
 
-        var activity = new ParallelActivitySnapshot
+        return new ParallelActivitySnapshot
         {
             Kind = ParallelActivityKind.MediaPlayback,
-            ProcessName = activeProcessName,
+            ProcessName = processName,
             WindowTitle = "后台媒体播放",
             Description = "后台媒体播放中",
             CountInTotal = false,
             IsCurrentProcess = false,
-            ObservedDuration = idleDuration
+            ObservedDuration = observedDuration
         };
-        LogParallelAudioState(snapshot, playback, audibleProcessNames, activity);
-        return activity;
     }
 
-    private void LogParallelAudioState(WindowSnapshot snapshot, MediaPlaybackSnapshot playback, IReadOnlyCollection<string> audibleProcessNames, ParallelActivitySnapshot? activity)
+    // 把当前拍稳定有声的后台媒体时长累计到活动会话（按真实拍间隔；休眠/卡顿产生的异常间隔封顶丢弃）。
+    private void AccumulateSessionParallel(IReadOnlyList<string> activeProcessNames, DateTime now)
+    {
+        if (_activeRecord is null)
+        {
+            _sessionParallelLastTickAt = now;
+            return;
+        }
+
+        if (_sessionParallelLastTickAt != default)
+        {
+            var elapsedSeconds = (now - _sessionParallelLastTickAt).TotalSeconds;
+            if (elapsedSeconds > 0 && elapsedSeconds <= 2)
+            {
+                var recordProcessName = NormalizeProcessName(_activeRecord.ProcessName);
+                foreach (var processName in activeProcessNames)
+                {
+                    // 切换窗口那一拍稳定列表是按“新前台”计算的，但本拍随后可能关闭旧记录；
+                    // 累计进旧记录前必须排除与旧记录自身同名的进程（如前台刚切到 QQ音乐），避免自引用。
+                    if (string.Equals(NormalizeProcessName(processName), recordProcessName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    _sessionParallelSeconds.TryGetValue(processName, out var seconds);
+                    _sessionParallelSeconds[processName] = seconds + elapsedSeconds;
+                }
+            }
+        }
+
+        _sessionParallelLastTickAt = now;
+    }
+
+    // 生成当前会话累计的全部并行媒体快照（每个进程一条，ObservedDuration=本会话实际有声秒数）。
+    private List<ParallelActivitySnapshot> BuildSessionParallelSnapshots()
+    {
+        return _sessionParallelSeconds
+            .Where(x => x.Value > 0)
+            .OrderByDescending(x => x.Value)
+            .ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(x => CreateParallelSnapshot(x.Key, TimeSpan.FromSeconds(x.Value))!)
+            .ToList();
+    }
+
+    private void ResetSessionParallelAccumulator(DateTime? now = null)
+    {
+        _sessionParallelSeconds.Clear();
+        _sessionParallelLastTickAt = now ?? default;
+    }
+
+    private void LogParallelAudioState(WindowSnapshot snapshot, MediaPlaybackSnapshot playback, IReadOnlyCollection<string> audibleProcessNames, string? activeProcessName)
     {
         if (!VerboseDiagnosticsEnabled)
         {
@@ -2137,7 +2511,7 @@ public sealed class UsageTrackerService : IDisposable
         _lastParallelAudioStateLogAt = DateTime.Now;
         if (playback.ActiveProcessNames.Count == 0
             && audibleProcessNames.Count == 0
-            && activity is null
+            && activeProcessName is null
             && _parallelAudioStates.Count == 0)
         {
             return;
@@ -2147,7 +2521,7 @@ public sealed class UsageTrackerService : IDisposable
         var states = string.Join(", ", _parallelAudioStates.Select(x => $"{x.Key}:aud={x.Value.AudibleSamples}:sil={x.Value.SilentSamples}:active={x.Value.IsActiveParallel}"));
         NativeLogger.LogStartupMessage(
             "ParallelAudioState",
-            $"fg={snapshot.ProcessName}, playback=[{string.Join(", ", playback.ActiveProcessNames)}], audibleWhitelist=[{string.Join(", ", audibleProcessNames)}], activity={activity?.ProcessName ?? "None"}, whitelist=[{whitelist}], states=[{states}]");
+            $"fg={snapshot.ProcessName}, playback=[{string.Join(", ", playback.ActiveProcessNames)}], audibleWhitelist=[{string.Join(", ", audibleProcessNames)}], activity={activeProcessName ?? "None"}, whitelist=[{whitelist}], states=[{states}]");
     }
 
     private static bool IsShellOrSystemSurface(WindowSnapshot snapshot)
@@ -2299,7 +2673,7 @@ public sealed class UsageTrackerService : IDisposable
         if (snapshot is null)
         {
             ResetForegroundVideoState();
-            _lastParallelActivitySnapshot = null;
+            // 前台窗口取不到时：本会话已累计的并行媒体时长仍要随关闭落库（CloseActiveSession 内部处理）。
             var closedForUnavailableWindow = CloseActiveSession(now);
             if (!isInitial || closedForUnavailableWindow is not null)
             {
@@ -2312,15 +2686,16 @@ public sealed class UsageTrackerService : IDisposable
             _activeRecord.LastCapturedAt = now;
         }
         UpdateForegroundVideoState(snapshot, playbackSnapshot, now);
+        // 每拍只推进一次去抖状态机，空闲/非空闲两条路径共用本拍结果。
+        var stableParallelProcesses = UpdateStableParallelProcesses(playbackSnapshot, snapshot);
         if (SystemActivityMonitor.TryGetIdleDuration(out var idleDuration) && idleDuration >= IdleTimeout)
         {
-            var mediaProtection = EvaluateIdleMediaProtection(snapshot, idleDuration, playbackSnapshot);
-            _lastParallelActivitySnapshot = mediaProtection.ParallelActivity;
+            var mediaProtection = EvaluateIdleMediaProtection(snapshot, idleDuration, playbackSnapshot, stableParallelProcesses);
+            // 空闲期间（含媒体保护续期）音乐确实仍在播放，同样按拍累计并行时长。
+            AccumulateSessionParallel(stableParallelProcesses, now);
             if (_activeRecord is not null)
             {
-                _activeRecord.ParallelActivities = _lastParallelActivitySnapshot is null
-                    ? null
-                    : [_lastParallelActivitySnapshot.Clone()];
+                _activeRecord.ParallelActivities = BuildSessionParallelSnapshots();
             }
             if (mediaProtection.ShouldProtect)
             {
@@ -2340,22 +2715,21 @@ public sealed class UsageTrackerService : IDisposable
             }
             return;
         }
-        _lastParallelActivitySnapshot = BuildParallelActivitySnapshot(playbackSnapshot, snapshot, TimeSpan.Zero);
-        if (_activeRecord is not null)
-        {
-            _activeRecord.ParallelActivities = _lastParallelActivitySnapshot is null
-                ? null
-                : [_lastParallelActivitySnapshot.Clone()];
-        }
         if (_activeRecord is null)
         {
+            // 新会话从零累计；首拍不贡献时长，从下一拍开始按真实间隔累加。
+            ResetSessionParallelAccumulator(now);
             _activeRecord = UsageSessionRecord.Start(snapshot.ProcessName, snapshot.WindowTitle, now);
             _activeRecord.ManualSubject = ResolveSubjectForNewSession(_activeRecord);
             _activeRecord.LastCapturedAt = now;
+            _activeRecord.ParallelActivities = BuildSessionParallelSnapshots();
             SaveActiveSessionIncremental();
             RaiseChanged(null, ToActiveSession(_activeRecord, now, ResolveSubjectForDisplay(_activeRecord)));
             return;
         }
+        // 先累计本拍再决定续存/切换，保证切换窗口的最后一拍计入旧会话。
+        AccumulateSessionParallel(stableParallelProcesses, now);
+        _activeRecord.ParallelActivities = BuildSessionParallelSnapshots();
         if (_activeRecord.ProcessName.Equals(snapshot.ProcessName, StringComparison.OrdinalIgnoreCase)
             && _activeRecord.WindowTitle.Equals(snapshot.WindowTitle, StringComparison.Ordinal))
         {
@@ -2367,6 +2741,7 @@ public sealed class UsageTrackerService : IDisposable
             return;
         }
         var closed = CloseActiveSession(now);
+        ResetSessionParallelAccumulator(now);
         _activeRecord = UsageSessionRecord.Start(snapshot.ProcessName, snapshot.WindowTitle, now);
         _activeRecord.ManualSubject = ResolveSubjectForNewSession(_activeRecord);
         SaveActiveSessionIncremental();
@@ -2380,21 +2755,19 @@ public sealed class UsageTrackerService : IDisposable
         }
         if (endTime <= _activeRecord.StartTime)
         {
-            _lastParallelActivitySnapshot = null;
+            ResetSessionParallelAccumulator();
             _activeRecord = null;
             SaveActiveSessionIncremental();
             return null;
         }
         _activeRecord.EndTime = endTime;
-        var activeParallelActivities = _lastParallelActivitySnapshot is null
-            ? []
-            : new List<ParallelActivitySnapshot> { _lastParallelActivitySnapshot.Clone() };
-        _activeRecord.ParallelActivities = activeParallelActivities;
+        // 落库以会话累计器为准：会话期间出现过的全部后台媒体进程都保留，时长为真实累计秒数。
+        _activeRecord.ParallelActivities = BuildSessionParallelSnapshots();
         var closed = ToSession(_activeRecord, ResolveSubjectForDisplay(_activeRecord));
         var closedRecord = _activeRecord;
         _history.Add(_activeRecord);
         _dirtyRecords[_activeRecord.Id] = _activeRecord;
-        _lastParallelActivitySnapshot = null;
+        ResetSessionParallelAccumulator();
         _activeRecord = null;
         SaveSessionIncremental(closedRecord);
         return closed;
@@ -2685,23 +3058,9 @@ public sealed class UsageTrackerService : IDisposable
         {
             _activeRecord = null;
         }
-        _manualSubjects.Clear();
-        foreach (var pair in state.ManualSubjects ?? new Dictionary<string, string>())
+        if (ReplaceManualSubjectState(state.ManualSubjects, state.ManualSubjectScopes))
         {
-            // 旧版“空分类”标记不再保留：置空即无手动覆盖，应重新接受关键词匹配
-            if (pair.Value == ClassificationResolver.EmptySubjectMarker)
-            {
-                migratedLegacyUnclassified = true;
-                continue;
-            }
-            var manualSubject = string.Equals(pair.Value, LegacyAutoUnclassifiedLabel, StringComparison.OrdinalIgnoreCase)
-                ? ManualUnclassifiedLabel
-                : pair.Value;
-            if (!string.Equals(manualSubject, pair.Value, StringComparison.OrdinalIgnoreCase))
-            {
-                migratedLegacyUnclassified = true;
-            }
-            _manualSubjects[pair.Key] = manualSubject;
+            migratedLegacyUnclassified = true;
         }
         _subjectKeywordRules.Clear();
         foreach (var pair in state.SubjectKeywordRules ?? new Dictionary<string, List<string>>())
@@ -2876,6 +3235,10 @@ public sealed class UsageTrackerService : IDisposable
         {
             IdleTimeoutMinutes = NormalizeIdleTimeoutMinutes(idleTimeoutMinutes);
         }
+        if (settings.CompactWindowOpacity is { } compactWindowOpacity)
+        {
+            CompactWindowOpacity = NormalizeCompactWindowOpacity(compactWindowOpacity);
+        }
         if (settings.ManualIdleShortcutText is not null)
         {
             ManualIdleShortcutText = settings.ManualIdleShortcutText.Trim();
@@ -2884,18 +3247,7 @@ public sealed class UsageTrackerService : IDisposable
         {
             SubjectDeleteBehavior = NormalizeSubjectDeleteBehavior(settings.SubjectDeleteBehavior);
         }
-        _manualSubjects.Clear();
-        foreach (var pair in settings.ManualSubjects ?? new Dictionary<string, string>())
-        {
-            // 旧版“空分类”标记不再保留：置空即无手动覆盖，应重新接受关键词匹配
-            if (pair.Value == ClassificationResolver.EmptySubjectMarker)
-            {
-                continue;
-            }
-            _manualSubjects[pair.Key] = string.Equals(pair.Value, LegacyAutoUnclassifiedLabel, StringComparison.OrdinalIgnoreCase)
-                ? ManualUnclassifiedLabel
-                : pair.Value;
-        }
+        ReplaceManualSubjectState(settings.ManualSubjects, settings.ManualSubjectScopes);
         _subjectKeywordRules.Clear();
         foreach (var pair in settings.SubjectKeywordRules ?? new Dictionary<string, List<string>>())
         {
@@ -2960,6 +3312,7 @@ public sealed class UsageTrackerService : IDisposable
         return new UsageTrackerSettings
         {
             ManualSubjects = new Dictionary<string, string>(_manualSubjects, StringComparer.OrdinalIgnoreCase),
+            ManualSubjectScopes = SnapshotManualSubjectScopes(),
             SubjectKeywordRules = existingSubjectKeywordRules ?? SnapshotSubjectKeywordRules(),
             SubjectDefinitions = _subjectDefinitions.Select(x => x.Clone()).ToList(),
             SubjectOptions = null,
@@ -2970,6 +3323,7 @@ public sealed class UsageTrackerService : IDisposable
             ThemeAccentSlots = _themeAccentSlots.ToList(),
             ParallelActivityWhitelistProcesses = _parallelActivityWhitelistProcesses.ToList(),
             IdleTimeoutMinutes = idleTimeoutMinutes,
+            CompactWindowOpacity = CompactWindowOpacity,
             ManualIdleShortcutText = shortcutText,
             SubjectDeleteBehavior = SubjectDeleteBehavior.ToString()
         };
@@ -2994,6 +3348,7 @@ public sealed class UsageTrackerService : IDisposable
             Active = active,
             History = recordsById.Values.OrderByDescending(x => x.StartTime).Select(x => x.Clone()).ToList(),
             ManualSubjects = new Dictionary<string, string>(_manualSubjects, StringComparer.OrdinalIgnoreCase),
+            ManualSubjectScopes = SnapshotManualSubjectScopes(),
             SubjectOptions = null
         };
     }
@@ -3008,6 +3363,7 @@ public sealed class UsageTrackerService : IDisposable
         return new UsageTrackerState
         {
             ManualSubjects = new Dictionary<string, string>(_manualSubjects, StringComparer.OrdinalIgnoreCase),
+            ManualSubjectScopes = SnapshotManualSubjectScopes(),
             SubjectKeywordRules = _subjectKeywordRules.ToDictionary(x => x.Key, x => x.Value.ToList(), StringComparer.OrdinalIgnoreCase),
             SubjectDefinitions = _subjectDefinitions.Select(x => x.Clone()).ToList(),
             SubjectOptions = null,
@@ -3017,6 +3373,7 @@ public sealed class UsageTrackerService : IDisposable
             ThemeAccentSlots = _themeAccentSlots.ToList(),
             ParallelActivityWhitelistProcesses = _parallelActivityWhitelistProcesses.ToList(),
             IdleTimeoutMinutes = IdleTimeoutMinutes,
+            CompactWindowOpacity = CompactWindowOpacity,
             ManualIdleShortcutText = ManualIdleShortcutText,
             SubjectDeleteBehavior = SubjectDeleteBehavior.ToString()
         };
@@ -3034,6 +3391,7 @@ public sealed class UsageTrackerService : IDisposable
             Active = _activeRecord?.Clone(),
             History = _history.OrderByDescending(x => x.StartTime).Select(x => x.Clone()).ToList(),
             ManualSubjects = new Dictionary<string, string>(_manualSubjects, StringComparer.OrdinalIgnoreCase),
+            ManualSubjectScopes = SnapshotManualSubjectScopes(),
             SubjectKeywordRules = _subjectKeywordRules.ToDictionary(x => x.Key, x => x.Value.ToList(), StringComparer.OrdinalIgnoreCase),
             SubjectDefinitions = _subjectDefinitions.Select(x => x.Clone()).ToList(),
             SubjectOptions = null,
@@ -3043,6 +3401,7 @@ public sealed class UsageTrackerService : IDisposable
             ThemeAccentSlots = _themeAccentSlots.ToList(),
             ParallelActivityWhitelistProcesses = _parallelActivityWhitelistProcesses.ToList(),
             IdleTimeoutMinutes = IdleTimeoutMinutes,
+            CompactWindowOpacity = CompactWindowOpacity,
             ManualIdleShortcutText = ManualIdleShortcutText,
             SubjectDeleteBehavior = SubjectDeleteBehavior.ToString()
         };
@@ -3151,6 +3510,31 @@ public sealed class UsageTrackerService : IDisposable
         catch (Exception ex)
         {
             NativeLogger.LogStartupException("UsageTrackerService.SaveIdleTimeoutImmediately", ex);
+            throw;
+        }
+    }
+    private void SaveCompactWindowOpacityImmediately()
+    {
+        try
+        {
+            Directory.CreateDirectory(_dataDirectory);
+            UsageTrackerSettings settings;
+            if (File.Exists(_settingsFilePath))
+            {
+                using var stream = File.OpenRead(_settingsFilePath);
+                settings = JsonSerializer.Deserialize(stream, UsageTrackerJsonContext.Default.UsageTrackerSettings) ?? new UsageTrackerSettings();
+            }
+            else
+            {
+                settings = new UsageTrackerSettings();
+            }
+
+            settings.CompactWindowOpacity = CompactWindowOpacity;
+            WriteSettingsAtomically(_settingsFilePath, settings);
+        }
+        catch (Exception ex)
+        {
+            NativeLogger.LogStartupException("UsageTrackerService.SaveCompactWindowOpacityImmediately", ex);
             throw;
         }
     }
@@ -3337,18 +3721,7 @@ public sealed class UsageTrackerService : IDisposable
             _subjectKeywordRules[pair.Key] = pair.Value;
         }
 
-        _manualSubjects.Clear();
-        foreach (var pair in settings.ManualSubjects ?? new Dictionary<string, string>())
-        {
-            // 旧版“空分类”标记不再保留：置空即无手动覆盖，应重新接受关键词匹配
-            if (pair.Value == ClassificationResolver.EmptySubjectMarker)
-            {
-                continue;
-            }
-            _manualSubjects[pair.Key] = string.Equals(pair.Value, LegacyAutoUnclassifiedLabel, StringComparison.OrdinalIgnoreCase)
-                ? ManualUnclassifiedLabel
-                : pair.Value;
-        }
+        ReplaceManualSubjectState(settings.ManualSubjects, settings.ManualSubjectScopes);
 
         if (settings.SubjectDefinitions is { Count: > 0 })
         {
@@ -3372,6 +3745,7 @@ public sealed class UsageTrackerService : IDisposable
         {
             SubjectKeywordRules = SnapshotSubjectKeywordRules(),
             ManualSubjects = new Dictionary<string, string>(_manualSubjects, StringComparer.OrdinalIgnoreCase),
+            ManualSubjectScopes = SnapshotManualSubjectScopes(),
             SubjectDefinitions = _subjectDefinitions.ToList()
         };
     }
@@ -3383,9 +3757,16 @@ public sealed class UsageTrackerService : IDisposable
         var manual = (settings.ManualSubjects ?? new Dictionary<string, string>())
             .OrderBy(x => x.Key, StringComparer.Ordinal)
             .Select(x => x.Key + "=>" + x.Value);
-        var definitions = (settings.SubjectDefinitions ?? new List<SubjectDefinition>())
+        IEnumerable<string> definitions = (settings.SubjectDefinitions ?? new List<SubjectDefinition>())
             .Select(x => x.Name)
             .OrderBy(x => x, StringComparer.Ordinal);
+        // 时间线也要进签名：flat 当前值不变但历史节点变化时，外部 settings 变更不能被误判为重复写入。
+        var scopes = (settings.ManualSubjectScopes ?? new Dictionary<string, List<ManualSubjectScope>>())
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .Select(x => x.Key + "=>" + string.Join("|", (x.Value ?? [])
+                .OrderBy(s => s.EffectiveFrom)
+                .Select(s => s.EffectiveFrom.ToString("O") + "=" + (s.Subject ?? string.Empty))));
+        definitions = definitions.Concat(scopes);
         return string.Join("", rules) + "" + string.Join("", manual) + "" + string.Join("", definitions);
     }
     private void SaveStateImmediately()
@@ -3568,16 +3949,45 @@ public sealed class UsageTrackerService : IDisposable
     {
         _repository.WriteIncrementalToDatabase(request);
     }
-    private void MergeManualSubjects(Dictionary<string, string>? incoming)
+    private void MergeManualSubjects(
+        Dictionary<string, string>? incoming,
+        Dictionary<string, List<ManualSubjectScope>>? incomingScopes = null)
     {
-        if (incoming is null)
+        // 先合并新格式时间线（TryAdd 语义：本机已有同 key 的时间线以本机为准）
+        if (incomingScopes is not null)
         {
-            return;
+            foreach (var pair in incomingScopes)
+            {
+                if (string.IsNullOrWhiteSpace(pair.Key) || _manualSubjectScopes.ContainsKey(pair.Key))
+                {
+                    continue;
+                }
+                var timeline = NormalizeScopeTimeline(pair.Value);
+                if (timeline.Count > 0)
+                {
+                    _manualSubjectScopes[pair.Key] = timeline;
+                }
+            }
         }
-        foreach (var pair in incoming.Where(x => !string.IsNullOrWhiteSpace(x.Key) && !string.IsNullOrWhiteSpace(x.Value)))
+
+        if (incoming is not null)
         {
-            _manualSubjects.TryAdd(pair.Key, pair.Value);
+            // 旧版 flat 只补时间线缺失的 key，按“有史以来生效”迁移
+            foreach (var pair in incoming.Where(x => !string.IsNullOrWhiteSpace(x.Key) && !string.IsNullOrWhiteSpace(x.Value)))
+            {
+                if (_manualSubjectScopes.ContainsKey(pair.Key))
+                {
+                    continue;
+                }
+                var normalized = NormalizeManualValue(pair.Value);
+                if (normalized is not null)
+                {
+                    _manualSubjectScopes[pair.Key] = [new ManualSubjectScope(DateTime.MinValue, normalized)];
+                }
+            }
         }
+
+        RebuildFlatManualSubjects();
     }
     private void MergeSubjectKeywordRules(Dictionary<string, List<string>>? incoming)
     {
@@ -3689,14 +4099,9 @@ public sealed class UsageTrackerService : IDisposable
         {
             return;
         }
-        var matchingKeys = _manualSubjects
-            .Where(x => subjectSet.Contains(x.Value))
-            .Select(x => x.Key)
-            .ToList();
-        foreach (var key in matchingKeys)
-        {
-            _manualSubjects.Remove(key);
-        }
+        // 当前生效分类属于被删分类的整条手动时间线作废（与历史上的 flat 删除语义一致），
+        // 时间线作废后这些 key 的历史/当日记录全部回落到关键词或提升分类。
+        RemoveManualScopesForCurrentSubjects(subjectSet);
         foreach (var record in _history.Where(record => subjectSet.Contains(record.ManualSubject ?? string.Empty)))
         {
             record.ManualSubject = promotedSubject ?? MatchSubjectByKeyword(record.ProcessName, record.WindowTitle);
@@ -3726,6 +4131,8 @@ public sealed class UsageTrackerService : IDisposable
         {
             _manualSubjects[key] = newSubject;
         }
+        // 时间线内的历史节点引用旧分类名时一并改名，保证历史快照仍指向重命名后的分类。
+        RenameManualScopes(oldSubject, newSubject);
         foreach (var record in _history.Where(x => string.Equals(x.ManualSubject, oldSubject, StringComparison.OrdinalIgnoreCase)))
         {
             record.ManualSubject = newSubject;
@@ -3751,14 +4158,7 @@ public sealed class UsageTrackerService : IDisposable
         {
             return;
         }
-        var matchingKeys = _manualSubjects
-            .Where(x => subjectSet.Contains(x.Value))
-            .Select(x => x.Key)
-            .ToList();
-        foreach (var key in matchingKeys)
-        {
-            _manualSubjects.Remove(key);
-        }
+        RemoveManualScopesForCurrentSubjects(subjectSet);
         if (_activeRecord is not null && _activeRecord.ManualSubject is not null && subjectSet.Contains(_activeRecord.ManualSubject))
         {
             _activeRecord.ManualSubject = null;
@@ -3807,34 +4207,36 @@ public sealed class UsageTrackerService : IDisposable
     }
     private string? ResolveSubjectForDisplay(UsageSessionRecord record)
     {
-        return ClassificationResolver.Resolve(
+        // 按记录自身时间解析：当日模式的分类修改不得追溯改变历史记录的显示。
+        return ResolveSubjectAtTime(
             record.ProcessName,
             record.WindowTitle,
-            _subjectDefinitions,
-            _subjectKeywordRules,
-            _manualSubjects,
+            record.StartTime,
             record.ManualSubject);
     }
     private void RefreshTodayUnmanualSnapshots()
     {
-        // When keyword rules change, re-evaluate ALL records — not just today's.
-        // Clear auto-classified snapshots (those without a user manual override in _manualSubjects)
-        // so they get re-classified with the new rules.
+        // 关键词规则变化时重估全部记录。每条记录按其自身时间查手动分类时间线：
+        // 该时刻存在手动分类节点则尊重手动结果（历史快照不被现在的关键词改动波及），
+        // 否则按当前关键词规则重新归类。
         foreach (var record in _history)
         {
             var classificationKey = BuildClassificationKey(record.ProcessName, record.WindowTitle);
-            var hasUserOverride = _manualSubjects.TryGetValue(classificationKey, out var overrideSubject)
-                && overrideSubject != ClassificationResolver.EmptySubjectMarker;
+            _manualSubjectScopes.TryGetValue(classificationKey, out var timeline);
+            var hasAssignment = ClassificationResolver.TryGetManualSubjectAt(timeline, record.StartTime, out var assignment);
+            var hasUserOverride = hasAssignment
+                && !string.IsNullOrWhiteSpace(assignment)
+                && assignment != ClassificationResolver.EmptySubjectMarker;
 
             if (hasUserOverride)
             {
-                // User manually set this subject — respect it
-                record.ManualSubject = ClassificationResolver.NormalizeSubject(overrideSubject);
+                // 该记录所属时刻有手动分类 — 尊重历史快照
+                record.ManualSubject = ClassificationResolver.NormalizeSubject(assignment);
             }
             else
             {
-                // Auto-classified (含被用户置空的记录) — re-evaluate with current keyword rules
-                record.ManualSubject = ResolveSubjectForNewSession(record);
+                // 自动分类（含该时刻被用户置空的记录）— 按当前关键词规则重新评估
+                record.ManualSubject = MatchSubjectByKeyword(record.ProcessName, record.WindowTitle);
                 lock (_saveLock)
                 {
                     if (!string.IsNullOrWhiteSpace(record.ManualSubject))
@@ -3855,7 +4257,7 @@ public sealed class UsageTrackerService : IDisposable
             }
             else
             {
-                _activeRecord.ManualSubject = ResolveSubjectForNewSession(_activeRecord);
+                _activeRecord.ManualSubject = MatchSubjectByKeyword(_activeRecord.ProcessName, _activeRecord.WindowTitle);
             }
         }
         QueueIncrementalSave();
@@ -3870,7 +4272,8 @@ public sealed class UsageTrackerService : IDisposable
         _appliedSnapshotDates.Add(snapshotDate);
         foreach (var record in _history.Where(record => record.StartTime.Date < snapshotDate && string.IsNullOrWhiteSpace(record.ManualSubject)))
         {
-            record.ManualSubject = ResolveSubjectForNewSession(record);
+            // 跨日固化快照时按记录所属时刻解析，避免把“当日才生效”的新分类误写进更早的历史。
+            record.ManualSubject = ResolveSubjectAtTime(record.ProcessName, record.WindowTitle, record.StartTime, null);
         }
     }
     private static UsageSession ToSession(UsageSessionRecord record, string? manualSubject)
@@ -3897,7 +4300,7 @@ public sealed class UsageTrackerService : IDisposable
             StartTime = record.StartTime,
             EndTime = now,
             ManualSubject = manualSubject,
-            ParallelActivities = _lastParallelActivitySnapshot is null ? [] : [_lastParallelActivitySnapshot]
+            ParallelActivities = BuildSessionParallelSnapshots()
         };
     }
     public void Dispose()
@@ -3944,6 +4347,7 @@ public sealed class UsageTrackerService : IDisposable
     private void StartIdleClickDetection()
     {
         _wasMouseButtonDown = IsAnyMouseButtonDown();
+        _idleLastCursorPos = TryGetCursorPos();
         _idleClickTimer.Change(TimeSpan.Zero, TimeSpan.FromMilliseconds(80));
     }
     private void IdleClickTimer_Tick()
@@ -3955,15 +4359,8 @@ public sealed class UsageTrackerService : IDisposable
             return;
         }
 
-        // Ignore the input event that triggered the manual-idle command itself.
-        if (_manualIdleStartedAt is { } manualIdleStartedAt
-            && DateTime.Now - manualIdleStartedAt < TimeSpan.FromSeconds(3))
-        {
-            _wasMouseButtonDown = IsAnyMouseButtonDown();
-            return;
-        }
-
-        // Manual idle stays active until a real mouse click resumes tracking.
+        // 恢复条件1：真实鼠标点击 / 数位板笔尖按下（多数笔驱动会合成鼠标按键）。明确的点击立即恢复，
+        // 不受手动空闲保护期限制。
         var isMouseButtonDown = IsAnyMouseButtonDown();
         if (isMouseButtonDown && !_wasMouseButtonDown)
         {
@@ -3972,23 +4369,44 @@ public sealed class UsageTrackerService : IDisposable
             return;
         }
         _wasMouseButtonDown = isMouseButtonDown;
-        if (_manualIdleRequested)
+
+        // 手动空闲可由键盘快捷键或小窗点击触发，命令自身的输入事件会在开头几秒内表现为"有活动"，
+        // 忽略这段时间避免一进入空闲就立刻退出。
+        if (_manualIdleStartedAt is { } manualIdleStartedAt
+            && DateTime.Now - manualIdleStartedAt < TimeSpan.FromSeconds(3))
         {
+            _idleLastCursorPos = TryGetCursorPos();
             return;
         }
 
-        // Exit condition 2: keyboard activity (e.g. Space to resume video playback)
-        // GetLastInputInfo tracks ALL input including keyboard; if idle duration
-        // dropped below a short threshold, the user resumed activity.
+        // 恢复条件2：键盘打字、鼠标滚轮、鼠标移动等任意系统输入。
+        // GetLastInputInfo 跟踪整个会话的键盘与鼠标输入；空闲时长回落到 2 秒内说明用户已回来。
+        // 自动空闲与手动空闲一视同仁——键盘操作就是明确的用户活动，不应要求必须点击鼠标。
         if (SystemActivityMonitor.TryGetIdleDuration(out var idleDuration) && idleDuration < TimeSpan.FromSeconds(2))
         {
             ExitIdleAwaitingClick();
             return;
         }
 
-        // Exit condition 3: media playback resumed (e.g. Space resumed video)
-        // Even without keyboard detection, if foreground process is playing audio,
-        // exit idle so CaptureCurrentWindow can resume tracking with media protection.
+        // 恢复条件3：数位板书写/笔移动等指针活动。部分笔驱动走 WM_POINTER（Real-Time Stylus）通道，
+        // 不更新 GetLastInputInfo，但会移动系统光标；位置显著变化即恢复。
+        var currentCursor = TryGetCursorPos();
+        if (currentCursor is { } currentPos && _idleLastCursorPos is { } lastCursorPos)
+        {
+            var dx = currentPos.X - lastCursorPos.X;
+            var dy = currentPos.Y - lastCursorPos.Y;
+            if (dx * dx + dy * dy >= CursorResumeDistanceSquared)
+            {
+                ExitIdleAwaitingClick();
+                return;
+            }
+        }
+        if (currentCursor is not null)
+        {
+            _idleLastCursorPos = currentCursor;
+        }
+
+        // 恢复条件4：媒体播放恢复（如空格恢复视频播放后前台进程重新出声）
         var foreground = ForegroundWindowTracker.GetCurrent();
         if (foreground is not null && MediaPlaybackMonitor.IsProcessPlaying(foreground.ProcessId))
         {
@@ -4023,6 +4441,21 @@ public sealed class UsageTrackerService : IDisposable
     private const int VkXButton2 = 0x06;
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
+
+    // 空闲恢复的光标位移阈值：80ms 轮询间隔内移动超过 6 像素即视为主动操作（书写/正常移动远大于此值，
+    // 静止时的坐标抖动不会误触）。存平方值比较，避免开方。
+    private const int CursorResumeDistanceSquared = 36;
+    private static CursorPoint? TryGetCursorPos()
+        => GetCursorPos(out var point) ? point : null;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorPoint
+    {
+        public int X;
+        public int Y;
+    }
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out CursorPoint lpPoint);
 }
 
 public sealed record SessionChangedEventArgs(UsageSession? ClosedSession, UsageSession? ActiveSession);
@@ -4084,6 +4517,8 @@ public enum SubjectDeleteBehavior
 public sealed class UsageTrackerSettings
 {
     public Dictionary<string, string>? ManualSubjects { get; set; }
+    // 手动分类生效时间线（历史快照语义）；ManualSubjects 为其当前生效值的派生冗余。
+    public Dictionary<string, List<ManualSubjectScope>>? ManualSubjectScopes { get; set; }
     public Dictionary<string, List<string>>? SubjectKeywordRules { get; set; }
     public List<string>? SubjectOptions { get; set; }
     public List<SubjectDefinition>? SubjectDefinitions { get; set; }
@@ -4094,6 +4529,8 @@ public sealed class UsageTrackerSettings
     public List<string>? ThemeAccentSlots { get; set; }
     public List<string>? ParallelActivityWhitelistProcesses { get; set; }
     public int? IdleTimeoutMinutes { get; set; }
+    // 桌面悬浮小窗背景不透明度（0.1~1），仅作用于小窗背景，文字与状态灯始终不透明；缺省 1 为不透明。
+    public double? CompactWindowOpacity { get; set; }
     public string? ManualIdleShortcutText { get; set; }
     public string? SubjectDeleteBehavior { get; set; }
 }
@@ -4102,6 +4539,7 @@ public sealed class UsageTrackerState
     public UsageSessionRecord? Active { get; set; }
     public List<UsageSessionRecord>? History { get; set; }
     public Dictionary<string, string>? ManualSubjects { get; set; }
+    public Dictionary<string, List<ManualSubjectScope>>? ManualSubjectScopes { get; set; }
     public Dictionary<string, List<string>>? SubjectKeywordRules { get; set; }
     public List<string>? SubjectOptions { get; set; }
     public List<SubjectDefinition>? SubjectDefinitions { get; set; }
@@ -4111,6 +4549,7 @@ public sealed class UsageTrackerState
     public List<string>? ThemeAccentSlots { get; set; }
     public List<string>? ParallelActivityWhitelistProcesses { get; set; }
     public int? IdleTimeoutMinutes { get; set; }
+    public double? CompactWindowOpacity { get; set; }
     public string? ManualIdleShortcutText { get; set; }
     public string? SubjectDeleteBehavior { get; set; }
 }

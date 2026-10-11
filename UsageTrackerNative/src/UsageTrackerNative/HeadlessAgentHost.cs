@@ -233,6 +233,14 @@ internal sealed class HeadlessAgentHost : ITrayHost, IDisposable
                     _service.SetIdleTimeoutMinutes(minutes);
                     return new WebCommandResult(true, Data: new { idleTimeoutMinutes = _service.IdleTimeoutMinutes });
                 }
+                case "settings-set-compact-opacity":
+                {
+                    var opacityString = Arg("opacity");
+                    if (!double.TryParse(opacityString, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var opacity))
+                        return new WebCommandResult(false, "小窗背景透明度无效");
+                    _service.SetCompactWindowOpacity(opacity);
+                    return new WebCommandResult(true, Data: new { compactWindowOpacity = _service.CompactWindowOpacity });
+                }
                 case "subject-snapshot":
                 {
                     var definitions = _service.GetSubjectDefinitions();
@@ -279,9 +287,11 @@ internal sealed class HeadlessAgentHost : ITrayHost, IDisposable
                     var keywords = StringArrayArg("keywords");
                     return RunSubjectChange(() => keywords.Count > 0 && keywords.All(keyword => _service.RemoveSubjectKeywordRule(subject, keyword)));
                 }
+                case "subject-rename-keyword": return RunSubjectChangeEx(() => { var ok = _service.RenameSubjectKeywordRule(Arg("subject") ?? string.Empty, Arg("oldKeyword") ?? string.Empty, Arg("newKeyword") ?? string.Empty, out var error); return (ok, error); });
                 case "subject-add-whitelist": return RunSubjectChangeEx(() => { var ok = _service.AddParallelActivityWhitelistProcess(Arg("process") ?? string.Empty, out var error); return (ok, error); });
                 case "subject-remove-whitelist": return RunSubjectChange(() => _service.RemoveParallelActivityWhitelistProcess(Arg("process") ?? string.Empty));
                 case "subject-remove-whitelist-processes": return RunSubjectChange(() => StringArrayArg("processes").Count > 0 && StringArrayArg("processes").All(_service.RemoveParallelActivityWhitelistProcess));
+                case "subject-rename-whitelist": return RunSubjectChangeEx(() => { var ok = _service.RenameParallelActivityWhitelistProcess(Arg("oldProcess") ?? string.Empty, Arg("newProcess") ?? string.Empty, out var error); return (ok, error); });
                 case "subject-set-delete-behavior":
                     if (!Enum.TryParse<SubjectDeleteBehavior>(Arg("behavior"), true, out var behavior)) return new WebCommandResult(false, "删除行为无效");
                     return RunSubjectChange(() => { _service.SetSubjectDeleteBehavior(behavior); return true; });

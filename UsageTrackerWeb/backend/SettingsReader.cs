@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using UsageTrackerNative;
 
 namespace UsageTrackerWeb;
 
@@ -54,7 +55,11 @@ public sealed class SettingsSnapshot
     public List<string>? ThemeAccentRecentColors { get; set; }
     public List<string>? ThemeAccentSlots { get; set; }
     public int? IdleTimeoutMinutes { get; set; }
+    // 桌面悬浮小窗背景不透明度（0.1~1）；缺省视为 1（不透明）。
+    public double? CompactWindowOpacity { get; set; }
     public Dictionary<string, string>? ManualSubjects { get; set; }
+    // 手动分类生效时间线（历史快照语义）；旧版本只有 ManualSubjects 时按“有史以来生效”处理。
+    public Dictionary<string, List<ManualSubjectScope>>? ManualSubjectScopes { get; set; }
     public Dictionary<string, List<string>>? SubjectKeywordRules { get; set; }
     public List<SubjectDefinitionDto>? SubjectDefinitions { get; set; }
 }

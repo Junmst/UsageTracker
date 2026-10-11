@@ -409,7 +409,7 @@ body.fog-animation-off::after {
 
 .appearance-layout {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 5fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 30px;
   align-items: stretch;
 }
@@ -1011,49 +1011,45 @@ body.fog-animation-off::after {
   font-size: 12px;
 }
 
-/* 快捷键与启动分区（原启动器功能迁移） */
-/* 设置页面板顺序（DOM 顺序与视觉顺序解耦）：个性化 → 快捷键 → 空闲判定 → 后台记录 → 信息列表 → 数据迁移 */
+/* 快捷键与启动已并入“个性化”卡片左列（背景动画设置下方） */
+/* 设置页面板顺序（DOM 顺序与视觉顺序解耦）：个性化 → 空闲判定 → 后台记录 → 信息列表 → 数据迁移 */
 .appearance-panel { order: 1; }
-.launcher-panel { order: 2; }
-.idle-panel { order: 3; }
-.agent-panel { order: 4; }
-.info-list { order: 5; }
-.transfer-panel { order: 6; }
+.idle-panel { order: 2; }
+.agent-panel { order: 3; }
+.info-list { order: 4; }
+.transfer-panel { order: 5; }
 
 .launcher-rows {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 4px 18px 16px;
+  padding: 4px 0 0;
 }
 
+.launcher-section-label {
+  margin-top: 24px;
+}
+
+
+/* 快捷键与启动：每行“名称 + 控件”严格一行排完，名称列定宽对齐，控件占满剩余空间 */
 .launcher-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 12px;
+  width: 100%;
 }
 
-.launcher-row-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.launcher-row-label span:first-child {
+.launcher-row-name {
+  flex: 0 0 84px;
   font-weight: 600;
   font-size: 13.5px;
-}
-
-.launcher-row-control {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  white-space: nowrap;
 }
 
 .hotkey-input {
-  width: 190px;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
   padding: 6px 10px;
   background: var(--category-card);
   border: 1px solid var(--border);
@@ -1063,6 +1059,11 @@ body.fog-animation-off::after {
   font-weight: 600;
   text-align: center;
   cursor: text;
+}
+
+.launcher-toggle {
+  flex: 0 0 auto;
+  min-width: 72px;
 }
 
 .hotkey-input:focus,
@@ -1772,6 +1773,7 @@ body.fog-animation-off::after {
   font-size: 12px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .stat-row-count {
@@ -1783,6 +1785,7 @@ body.fog-animation-off::after {
 }
 
 .progress-track {
+  display: flex;
   height: 7px;
   background: var(--category-card);
   border-radius: 999px;
@@ -1794,6 +1797,37 @@ body.fog-animation-off::after {
   border-radius: 999px;
   background: linear-gradient(90deg, var(--accent-soft), var(--accent));
   transition: width 0.35s ease;
+}
+
+/* 进程统计：前台段之后的后台并行播放段（浅色，不重复计入总时长） */
+.progress-fill-parallel {
+  border-radius: 0 999px 999px 0;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.list-caption-note {
+  margin-left: 8px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.stat-parallel-badge {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.stat-parallel-value {
+  margin-left: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.stat-value-empty {
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 .subject-tree {
@@ -2222,6 +2256,30 @@ body.fog-animation-off::after {
   font-weight: 700;
 }
 
+/* 并行媒体标志：该前台记录存续期间有白名单音乐/播放器在后台发声（时长不重复计入统计） */
+.parallel-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.55;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, transparent);
+  cursor: default;
+}
+
+.parallel-detail-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .session-title-dot,
 .live-dot {
   display: inline-block;
@@ -2340,6 +2398,127 @@ body.fog-animation-off::after {
 .pager-total {
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+/* 选中记录的详情卡条：sticky 钉在内容滚动区(.content)底部。
+   处于普通文档流，宽度天然等于内容区、与明细大卡片对齐，
+   导航栏展开收起导致内容区宽度变化时自动跟随；毛玻璃与右键菜单同款。 */
+.page.has-detail-bar {
+  padding-bottom: 96px;
+}
+
+.session-detail-panel {
+  position: sticky;
+  bottom: 10px;
+  z-index: 70;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 8px 16px;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  border-radius: 14px;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-lg);
+  animation: detail-bar-rise 0.18s ease-out;
+}
+
+/* 左侧：标题在上，进程名 · 分类紧贴其下；收紧行高避免把卡片撑高 */
+.session-detail-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.session-detail-main > * {
+  line-height: 1.35;
+}
+
+.session-detail-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 进程名 · 分类必须与标题左对齐：全局 .toolbar-hint 的 margin-left:auto 会把它推到列右缘 */
+.session-detail-main .toolbar-hint {
+  align-self: flex-start;
+  margin-left: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+/* 右侧：时间范围与并行信息两行右对齐，按内容定宽，不再把整卡撑高 */
+.session-detail-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.session-detail-meta .parallel-detail-line {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+@keyframes detail-bar-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* “卡片完全透明”主题会对 .panel 强制关闭模糊；详情条需始终保持与右键菜单同款毛玻璃 */
+:root[data-panel-transparent='true'] .session-detail-panel {
+  border-color: rgba(255, 255, 255, 0.85);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+@media (max-width: 640px) {
+  .page.has-detail-bar {
+    padding-bottom: 116px;
+  }
+
+  .session-detail-panel {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .session-detail-meta {
+    align-items: flex-start;
+    width: auto;
+    white-space: normal;
+  }
+
+  .session-detail-meta .parallel-detail-line {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .session-detail-main .toolbar-hint {
+    white-space: normal;
+  }
 }
 
 .search-shell {

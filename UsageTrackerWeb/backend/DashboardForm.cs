@@ -38,9 +38,9 @@ internal sealed class DashboardForm : Form
         Controls.Add(_webView);
         Controls.Add(_errorLabel);
         Shown += DashboardForm_Shown;
-        // 用户点关闭按钮即真正销毁窗口（而不是隐藏常驻）：
-        // 隐藏时 WebView2 渲染进程仍会保留整页 JS（SSE/轮询/Canvas 动画），白白占用数百 MB。
-        // 关闭后 Form 与 WebView2 一并释放，Chromium 进程组随之退出；下次从托盘/小窗/快捷键重新打开。
+        // 用户点关闭按钮 = 隐藏到后台常驻（不销毁 WebView2）：
+        // 页面 JS（SSE/定时器）继续在后台跑，数据始终保持最新，重开秒开无需重新加载。
+        // 程序退出时走 CloseDashboard 强制真正关闭。
         // 窗口标题栏/加载底色跟随 Web 深浅色：设置保存到 settings.json，监听其变化即时切换
         _themeDebounce.Tick += (_, _) =>
         {
@@ -166,9 +166,19 @@ internal sealed class DashboardForm : Form
         }
     }
 
-    // 用户点关闭按钮即真正销毁窗口（而不是隐藏常驻）：
-    // 隐藏时 WebView2 渲染进程仍会保留整页 JS（SSE/轮询/Canvas 动画），白白占用数百 MB。
-    // 关闭后 Form 与 WebView2 一并释放，Chromium 进程组随之退出；下次从托盘/小窗/快捷键重新打开。
+    // 用户点 X = 隐藏常驻；只有 CloseDashboard（程序退出）才真正销毁
+    private bool _forceClose;
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!_forceClose && e.CloseReason == CloseReason.UserClosing)
+        {
+            e.Cancel = true;
+            Hide();
+            return;
+        }
+        base.OnFormClosing(e);
+    }
 
     private void ShowError(string message)
     {
@@ -196,6 +206,7 @@ internal sealed class DashboardForm : Form
     public void CloseDashboard()
     {
         if (IsDisposed) return;
+        _forceClose = true;
         Close();
     }
 

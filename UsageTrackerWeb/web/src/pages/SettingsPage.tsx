@@ -43,6 +43,9 @@ export default function SettingsPage({
   const [idleTimeoutInput, setIdleTimeoutInput] = useState<string>('1');
   const [idleTimeoutBusy, setIdleTimeoutBusy] = useState(false);
   const [idleTimeoutMessage, setIdleTimeoutMessage] = useState('');
+  const [compactOpacity, setCompactOpacity] = useState(1);
+  const compactInteractingRef = useRef(false);
+  const compactSaveTimerRef = useRef<number | null>(null);
   const [launcherConfig, setLauncherConfig] = useState<LauncherConfig | null>(null);
   const [launcherBusy, setLauncherBusy] = useState(false);
   const [launcherMessage, setLauncherMessage] = useState('');
@@ -56,6 +59,7 @@ export default function SettingsPage({
         const value = snapshot.idleTimeoutMinutes ?? 1;
         setIdleTimeoutMinutes(value);
         setIdleTimeoutInput(String(value));
+        applyCompactOpacityFromServer(snapshot.compactWindowOpacity);
       }).catch(() => undefined);
     };
     refreshMetaSettings();
@@ -63,7 +67,10 @@ export default function SettingsPage({
     const loadAgent = () => void api.agentStatus(false).then(setAgent).catch(() => setAgent(null));
     loadAgent();
     const timer = window.setInterval(loadAgent, 3000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      if (compactSaveTimerRef.current !== null) window.clearTimeout(compactSaveTimerRef.current);
+    };
   }, []);
 
   // 后台配置/数据变化（空闲时长、记录数、库大小等）自动更新，无需手动刷新
@@ -73,8 +80,24 @@ export default function SettingsPage({
       const value = snapshot.idleTimeoutMinutes ?? 1;
       setIdleTimeoutMinutes(value);
       setIdleTimeoutInput(String(value));
+      applyCompactOpacityFromServer(snapshot.compactWindowOpacity);
     }).catch(() => undefined);
   });
+
+  // 小窗背景透明度：拖动时本地即时显示、停止操作 250ms 后持久化到 settings.json；
+  // 拖动期间不接受服务端回推，避免滑块被回读值抢回。
+  const applyCompactOpacityFromServer = (value: number | null | undefined) => {
+    if (compactInteractingRef.current) return;
+    setCompactOpacity(Math.min(1, Math.max(0, value ?? 1)));
+  };
+
+  const scheduleCompactOpacitySave = (value: number) => {
+    if (compactSaveTimerRef.current !== null) window.clearTimeout(compactSaveTimerRef.current);
+    compactSaveTimerRef.current = window.setTimeout(() => {
+      compactSaveTimerRef.current = null;
+      void api.saveCompactOpacity(value).catch(() => undefined);
+    }, 250);
+  };
 
   const saveIdleTimeout = async () => {
     const trimmed = idleTimeoutInput.trim();
@@ -338,80 +361,6 @@ export default function SettingsPage({
         </div>
       </div>
 
-      <div className="panel launcher-panel">
-        <div className="panel-title">快捷键与启动</div>
-        <div className="launcher-rows">
-          <div className="launcher-row">
-            <div className="launcher-row-label">
-              <span>网页快捷键</span>
-              <span className="toolbar-hint">全局按下即打开网页看板，默认 Ctrl + Alt + W</span>
-            </div>
-            <div className="launcher-row-control">
-              <HotkeyInput
-                value={launcherConfig?.browserHotkey?.gesture ?? null}
-                disabled={launcherBusy}
-                onCapture={(modifiers, key) => void saveBrowserHotkey(modifiers, key)}
-              />
-              <button
-                className="toolbar-button"
-                disabled={launcherBusy || !launcherConfig?.browserHotkey}
-                onClick={() => void clearBrowserHotkey()}
-              >清除</button>
-            </div>
-          </div>
-          <div className="launcher-row">
-            <div className="launcher-row-label">
-              <span>空闲快捷键</span>
-              <span className="toolbar-hint">全局按下即进入手动空闲，未设置则不响应</span>
-            </div>
-            <div className="launcher-row-control">
-              <HotkeyInput
-                value={launcherConfig?.manualIdleHotkey?.gesture ?? null}
-                disabled={launcherBusy}
-                onCapture={(modifiers, key) => void saveIdleHotkey(modifiers, key)}
-              />
-              <button
-                className="toolbar-button"
-                disabled={launcherBusy || !launcherConfig?.manualIdleHotkey}
-                onClick={() => void clearIdleHotkey()}
-              >清除</button>
-            </div>
-          </div>
-          <div className="launcher-row">
-            <div className="launcher-row-label">
-              <span>小窗快捷键</span>
-              <span className="toolbar-hint">全局按下即显示或隐藏桌面小窗，未设置则不响应</span>
-            </div>
-            <div className="launcher-row-control">
-              <HotkeyInput
-                value={launcherConfig?.statusWindowHotkey?.gesture ?? null}
-                disabled={launcherBusy}
-                onCapture={(modifiers, key) => void saveStatusWindowHotkey(modifiers, key)}
-              />
-              <button
-                className="toolbar-button"
-                disabled={launcherBusy || !launcherConfig?.statusWindowHotkey}
-                onClick={() => void clearStatusWindowHotkey()}
-              >清除</button>
-            </div>
-          </div>
-          <div className="launcher-row">
-            <div className="launcher-row-label">
-              <span>登录后启动</span>
-              <span className="toolbar-hint">开机登录 Windows 后自动在后台开始记录</span>
-            </div>
-            <div className="launcher-row-control">
-              <button
-                className={`toolbar-button${launcherConfig?.startupEnabled ? ' active' : ''}`}
-                disabled={launcherBusy}
-                onClick={() => void toggleStartup(!launcherConfig?.startupEnabled)}
-              >{launcherConfig?.startupEnabled ? '已开启 · 点击关闭' : '已关闭 · 点击开启'}</button>
-            </div>
-          </div>
-          {launcherMessage && <div className="toolbar-hint agent-message">{launcherMessage}</div>}
-        </div>
-      </div>
-
       <div className="panel appearance-panel">
         <div className="panel-title">个性化</div>
         <div className="appearance-layout">
@@ -442,6 +391,45 @@ export default function SettingsPage({
             <div className="mode-row mode-column animation-mode-column">
               <button className={`toolbar-button${fogAnimation ? ' active' : ''}`} onClick={() => onFogAnimationChange(!fogAnimation)}>雾动画 {fogAnimation ? '开启' : '关闭'}</button>
               <button className={`toolbar-button${orbitAnimation ? ' active' : ''}`} onClick={() => onOrbitAnimationChange(!orbitAnimation)}>三环动画 {orbitAnimation ? '开启' : '关闭'}</button>
+            </div>
+            <div className="appearance-label launcher-section-label">快捷键与启动</div>
+            <div className="launcher-rows">
+              <div className="launcher-row">
+                <span className="launcher-row-name">网页快捷键</span>
+                <HotkeyInput
+                  value={launcherConfig?.browserHotkey?.gesture ?? null}
+                  disabled={launcherBusy}
+                  onCapture={(modifiers, key) => void saveBrowserHotkey(modifiers, key)}
+                  onClear={() => void clearBrowserHotkey()}
+                />
+              </div>
+              <div className="launcher-row">
+                <span className="launcher-row-name">空闲快捷键</span>
+                <HotkeyInput
+                  value={launcherConfig?.manualIdleHotkey?.gesture ?? null}
+                  disabled={launcherBusy}
+                  onCapture={(modifiers, key) => void saveIdleHotkey(modifiers, key)}
+                  onClear={() => void clearIdleHotkey()}
+                />
+              </div>
+              <div className="launcher-row">
+                <span className="launcher-row-name">小窗快捷键</span>
+                <HotkeyInput
+                  value={launcherConfig?.statusWindowHotkey?.gesture ?? null}
+                  disabled={launcherBusy}
+                  onCapture={(modifiers, key) => void saveStatusWindowHotkey(modifiers, key)}
+                  onClear={() => void clearStatusWindowHotkey()}
+                />
+              </div>
+              <div className="launcher-row">
+                <span className="launcher-row-name">开机自启动</span>
+                <button
+                  className={`toolbar-button launcher-toggle${launcherConfig?.startupEnabled ? ' active' : ''}`}
+                  disabled={launcherBusy}
+                  onClick={() => void toggleStartup(!launcherConfig?.startupEnabled)}
+                >{launcherConfig?.startupEnabled ? '已开启' : '已关闭'}</button>
+              </div>
+              {launcherMessage && <div className="toolbar-hint agent-message">{launcherMessage}</div>}
             </div>
           </div>
           <div className="appearance-theme-column">
@@ -478,6 +466,32 @@ export default function SettingsPage({
                   value={theme.panelOpacity}
                   onChange={(event) => theme.setPanelOpacity(Number(event.target.value))}
                 />
+              </div>
+              <div className="panel-opacity-control">
+                <div className="panel-opacity-heading">
+                  <span>小窗背景透明度</span>
+                  <strong>{Math.round(compactOpacity * 100)}%</strong>
+                </div>
+                <input
+                  aria-label="小窗背景透明度"
+                  className="theme-palette-slider opacity-slider"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={compactOpacity}
+                  onPointerDown={() => { compactInteractingRef.current = true; }}
+                  onPointerUp={() => { compactInteractingRef.current = false; }}
+                  onPointerCancel={() => { compactInteractingRef.current = false; }}
+                  onKeyDown={() => { compactInteractingRef.current = true; }}
+                  onKeyUp={() => { compactInteractingRef.current = false; }}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    setCompactOpacity(value);
+                    scheduleCompactOpacitySave(value);
+                  }}
+                />
+                <div className="toolbar-hint">拖到 0% 时小窗边框与阴影一并消失，仅留文字与状态灯浮在桌面</div>
               </div>
             </div>
             </div>

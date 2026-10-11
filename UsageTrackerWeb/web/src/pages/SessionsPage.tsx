@@ -41,12 +41,35 @@ export default function SessionsPage() {
   const selectedItems = useMemo(() => items.filter((item) => selectedIds.has(item.id)), [items, selectedIds]);
   const selectedIdList = selectedId ? (selectedIds.has(selectedId) ? [...selectedIds] : [selectedId]) : [];
 
-  useEffect(() => {
-    void api.settings().then((value) => {
+  // 记录已知大类名：SSE 刷新分类定义时保留用户当前的展开/折叠状态，
+  // 不能整体重置（后台每 2 秒推送数据变更，会把刚展开的分类瞬间收起）
+  const knownMajorsRef = useRef<Set<string> | null>(null);
+
+  const refreshSubjects = () =>
+    api.settings().then((value) => {
       const definitions = value.subjectDefinitions ?? [];
       setSubjectDefinitions(definitions);
-      setCollapsedContextMajors(new Set(definitions.map((major) => major.name)));
+      setCollapsedContextMajors((prev) => {
+        const names = new Set(definitions.map((major) => major.name));
+        const known = knownMajorsRef.current;
+        knownMajorsRef.current = names;
+        if (known === null) {
+          // 首次加载：全部折叠
+          return new Set(names);
+        }
+        const next = new Set<string>();
+        for (const name of names) {
+          if (prev.has(name) || !known.has(name)) {
+            // 之前折叠的保持折叠；新出现的大类默认折叠；用户已展开的不动
+            next.add(name);
+          }
+        }
+        return next;
+      });
     }).catch(() => undefined);
+
+  useEffect(() => {
+    void refreshSubjects();
   }, []);
 
   useEffect(() => {
@@ -152,7 +175,11 @@ export default function SessionsPage() {
   }, [items]);
 
   // 后台任何变化（手动分类、关键词自动重匹配、记录增删）：静默局部重载，不闪 loading、不等轮询
-  useDataChange(() => forceReloadRef.current());
+  // 同时刷新分类定义，保证右键菜单的分类列表与后台一致（新建分类后无需手动刷新）
+  useDataChange(() => {
+    forceReloadRef.current();
+    void refreshSubjects();
+  });
 
   const pageIndex = Math.floor(skip / PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -210,7 +237,9 @@ export default function SessionsPage() {
     });
     if (uniqueTargets.length === 0) return;
     setActionBusy(true);
-    setActionMessage(`正在修改分类（${uniqueTargets.length} 组进程/窗口）…`);
+    setActionMessage(allHistory
+      ? `正在修改全历史分类（${uniqueTargets.length} 组进程/窗口）…`
+      : `正在修改当日及未来的分类（${uniqueTargets.length} 组进程/窗口）…`);
     setContextMenu(null);
     try {
       await api.sessionCommand('session-bulk-set-subject', {
@@ -223,8 +252,12 @@ export default function SessionsPage() {
       invalidateResponseCache();
       forceReloadRef.current();
       setActionMessage(subject === null
-        ? '已清除分类标记，并按关键词重新匹配分类'
-        : '分类已更新（同进程同窗口名称的记录一并生效）');
+        ? (allHistory
+            ? '已清除分类标记，全部历史记录已按关键词重新匹配分类'
+            : '已清除分类标记：当日及未来的记录按关键词重新匹配，更早的历史保持不变')
+        : (allHistory
+            ? '分类已更新（全历史中同进程同窗口名称的记录一并生效）'
+            : '分类已更新（当日及未来同进程同窗口名称的记录生效，更早的历史保持不变）'));
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : '修改失败');
     } finally {
@@ -445,14 +478,20 @@ export default function SessionsPage() {
   };
 
   return (
-    <div className="page">
+    <div className={`page${selectedId ? ' has-detail-bar' : ''}`}>
       <div className="page-header">
         <div>
           <h2>使用明细</h2>
           <div className="page-subtitle">拖动框选 · Shift 起止多选 · Ctrl 加选 · Ctrl+A 全选当前页</div>
         </div>
         <div className="header-actions session-search">
-          <button className={`toolbar-button${allHistory ? ' active' : ''}`} onClick={() => { setAllHistory((value) => !value); setSkip(0); }}>
+          <button
+            className={`toolbar-button${allHistory ? ' active' : ''}`}
+            title={allHistory
+              ? '全历史模式：修改分类将作用于同进程同窗口名称的全部历史记录'
+              : '当前日期模式：修改分类只作用于当日（凌晨4点起）及未来的记录，更早的历史保持不变'}
+            onClick={() => { setAllHistory((value) => !value); setSkip(0); }}
+          >
             {allHistory ? '全历史' : '当前日期'}
           </button>
           <div className="search-shell search-field" title="标题关键字，支持 + 或、* 与、- 剔除、() 分组，如 咸鱼-哔哩哔哩">
@@ -552,6 +591,12 @@ export default function SessionsPage() {
                   <span className="session-title ellipsis" title={item.windowTitle}>
                     <span className="session-title-dot" />
                     {item.windowTitle || '未命名窗口'}
+                    {item.parallelActivities && item.parallelActivities.length > 0 && (
+                      <span
+                        className="parallel-badge"
+                        title={`后台并行：${item.parallelActivities.map((activity) => activity.processName || activity.description).join('、')}`}
+                      >并行</span>
+                    )}
                   </span>
                   <span className="session-process ellipsis" title={item.processName}>{item.processName}</span>
                   <span className="session-start">{start.toLocaleString('zh-CN', { hour12: false })}</span>
@@ -597,7 +642,16 @@ export default function SessionsPage() {
       {selectedId && (() => {
         const selected = items.find((item) => item.id === selectedId);
         if (!selected) return null;
-        return <div className="panel session-detail-panel"><div><strong>{selected.windowTitle || selected.processName}</strong><span className="toolbar-hint">{selected.processName} · {selected.manualSubject ?? '空分类'}</span></div><div className="toolbar-hint">{new Date(selected.startTime).toLocaleString('zh-CN', { hour12: false })} — {selected.endTime ? new Date(selected.endTime).toLocaleString('zh-CN', { hour12: false }) : '进行中'}</div>{selected.parallelActivities && selected.parallelActivities.length > 0 && <div className="toolbar-hint">并行活动：{selected.parallelActivities.map((activity) => `${activity.processName || activity.description} ${formatDurationShort(activity.observedSeconds)}`).join('、')}</div>}</div>;
+        return <div className="panel session-detail-panel">
+          <div className="session-detail-main">
+            <strong className="session-detail-title">{selected.windowTitle || selected.processName}</strong>
+            <span className="toolbar-hint">{selected.processName} · {selected.manualSubject ?? '空分类'}{selected.manualSubject && selected.subjectSource === 'keyword' && selected.matchedKeywordRule ? `（匹配关键词：${selected.matchedKeywordRule}）` : null}{selected.manualSubject && selected.subjectSource === 'manual' ? '（手动指定）' : null}{selected.manualSubject && selected.subjectSource === 'stored' ? '（历史快照）' : null}</span>
+          </div>
+          <div className="session-detail-meta">
+            <span className="toolbar-hint">{new Date(selected.startTime).toLocaleString('zh-CN', { hour12: false })} — {selected.endTime ? new Date(selected.endTime).toLocaleString('zh-CN', { hour12: false }) : '进行中'}</span>
+            {selected.parallelActivities && selected.parallelActivities.length > 0 && <span className="toolbar-hint parallel-detail-line"><span className="parallel-badge">并行</span>{selected.parallelActivities.map((activity) => `${activity.processName || activity.description} ${formatDurationShort(activity.observedSeconds)}`).join('、')}（不计入时长）</span>}
+          </div>
+        </div>;
       })()}
 
       <div className="pager">

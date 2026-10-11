@@ -240,6 +240,21 @@ export default function SubjectManagementPage({ settings, onChanged }: Props) {
     }
   };
 
+  const renameSelection = async () => {
+    if (!subject) return;
+    if (selectedRules.size === 1) {
+      const oldKeyword = [...selectedRules][0];
+      const name = window.prompt('新的关键词', oldKeyword);
+      if (name) await run('subject-rename-keyword', { subject, oldKeyword, newKeyword: name }, { pending: `正在将关键词「${oldKeyword}」重命名为「${name}」…`, success: `已将关键词「${oldKeyword}」重命名为「${name}」`, fail: '重命名关键词失败' });
+      return;
+    }
+    if (selectedProcesses.size === 1) {
+      const oldProcess = [...selectedProcesses][0];
+      const name = window.prompt('新的进程名', oldProcess);
+      if (name) await run('subject-rename-whitelist', { oldProcess, newProcess: name }, { pending: `正在将进程「${oldProcess}」重命名为「${name}」…`, success: `已将进程「${oldProcess}」重命名为「${name}」`, fail: '重命名进程失败' });
+    }
+  };
+
   const selectedTotal = Object.values(selectedCounts).reduce((sum, count) => sum + count, 0);
 
   // ── 各操作的精确提示文案 ──
@@ -326,6 +341,21 @@ export default function SubjectManagementPage({ settings, onChanged }: Props) {
           <div className="subject-tool-actions"><button className="toolbar-button" disabled={busy || !major} onClick={() => { const name = major && window.prompt('新的大类名称', major.name); if (name) void run('subject-rename-major', { oldName: major.name, newName: name }, { pending: `正在将大类「${major.name}」重命名为「${name}」…`, success: `已将大类「${major.name}」重命名为「${name}」`, fail: '重命名大类失败' }); }}>重命名大类</button><button className="toolbar-button danger-button" disabled={busy || !major} onClick={() => { if (major && window.confirm(`删除大类“${major.name}”？`)) void run('subject-remove-major', { name: major.name }, { pending: `正在删除大类「${major.name}」…`, success: `已删除大类「${major.name}」`, fail: '删除大类失败' }); }}>删除大类</button></div>
           {parent && <div className="subject-tool-actions"><button className="toolbar-button" disabled={busy} onClick={() => { const name = window.prompt('新的父类名称', parent.name); if (name) void run('subject-rename-parent', { major: major?.name, oldName: parent.name, newName: name }, { pending: `正在将父类「${parent.name}」重命名为「${name}」…`, success: `已将父类「${parent.name}」重命名为「${name}」`, fail: '重命名父类失败' }); }}>重命名父类</button><button className="toolbar-button danger-button" disabled={busy} onClick={() => { if (window.confirm(`删除父类“${parent.name}”？`)) void run('subject-remove-parent', { major: major?.name, name: parent.name, promoteToParent: settings.deleteBehavior === 'PromoteToParent' }, { pending: `正在删除父类「${parent.name}」…`, success: `已删除父类「${parent.name}」`, fail: '删除父类失败' }); }}>删除父类</button></div>}
           {childName && <div className="subject-tool-actions"><button className="toolbar-button" disabled={busy} onClick={() => { const name = window.prompt('新的子类名称', childName); if (name) void run('subject-rename-child', { major: major?.name, parent: parent?.name, oldName: childName, newName: name }, { pending: `正在将子类「${childName}」重命名为「${name}」…`, success: `已将子类「${childName}」重命名为「${name}」`, fail: '重命名子类失败' }); }}>重命名子类</button><button className="toolbar-button danger-button" disabled={busy} onClick={() => { if (window.confirm(`删除子类“${childName}”？`)) void run('subject-remove-child', { major: major?.name, parent: parent?.name, name: childName, promoteToParent: settings.deleteBehavior === 'PromoteToParent' }, { pending: `正在删除子类「${childName}」…`, success: `已删除子类「${childName}」`, fail: '删除子类失败' }); }}>删除子类</button></div>}
+          {selectedRules.size > 0 && subject && (
+            <div className="subject-tool-actions">
+              <span className="toolbar-hint">已选 {selectedRules.size} 个关键词</span>
+              <button className="toolbar-button" disabled={busy} onClick={() => {
+                if (selectedRules.size !== 1) { notify('只能选择一个关键词进行重命名', 'error'); return; }
+                const oldKeyword = [...selectedRules][0];
+                const name = window.prompt('新的关键词', oldKeyword);
+                if (name) void run('subject-rename-keyword', { subject, oldKeyword, newKeyword: name }, { pending: `正在将关键词「${oldKeyword}」重命名为「${name}」…`, success: `已将关键词「${oldKeyword}」重命名为「${name}」`, fail: '重命名关键词失败' });
+              }}>重命名关键词</button>
+              <button className="toolbar-button danger-button" disabled={busy} onClick={() => {
+                const count = selectedRules.size;
+                if (window.confirm(`删除选中的 ${count} 个关键词？`)) void run('subject-remove-keywords', { subject, keywords: [...selectedRules] }, { pending: `正在删除 ${count} 个关键词…`, success: `已删除 ${count} 个关键词`, fail: '删除关键词失败' });
+              }}>删除关键词</button>
+            </div>
+          )}
         </section>
 
         <section className="panel subject-tool-panel">
@@ -341,7 +371,7 @@ export default function SubjectManagementPage({ settings, onChanged }: Props) {
         </section>
       </div>
 
-      {contextMenu && <div className="subject-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}><strong>已选 {selectedCounts[contextMenu.kind]} 项</strong><button className="toolbar-button danger-button" disabled={busy} onClick={() => { setContextMenu(null); void deleteSelection(); }}>删除已选</button><button className="toolbar-button" disabled={busy} onClick={() => { setContextMenu(null); clearSelections(); }}>取消选择</button></div>}
+      {contextMenu && <div className="subject-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}><strong>已选 {selectedCounts[contextMenu.kind]} 项</strong><button className="toolbar-button" disabled={busy || selectedCounts[contextMenu.kind] !== 1 || (contextMenu.kind !== 'rule' && contextMenu.kind !== 'process')} onClick={() => { setContextMenu(null); void renameSelection(); }}>重命名</button><button className="toolbar-button danger-button" disabled={busy} onClick={() => { setContextMenu(null); void deleteSelection(); }}>删除已选</button><button className="toolbar-button" disabled={busy} onClick={() => { setContextMenu(null); clearSelections(); }}>取消选择</button></div>}
     </div>
   );
 }

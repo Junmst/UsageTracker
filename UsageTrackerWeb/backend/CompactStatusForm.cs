@@ -1,23 +1,88 @@
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Drawing.Text;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace UsageTrackerWeb;
 
+/// <summary>
+/// 桌面悬浮小窗：分层窗口（UpdateLayeredWindow 逐像素 alpha）。
+/// 背景、边框与手绘柔光应用“小窗背景透明度”；透明度为 0 时三者全部消失，仅保留文字与状态灯。
+/// </summary>
 internal sealed class CompactStatusForm : Form
 {
-    private readonly StatusDotControl _statusDot = new();
-    private readonly SmoothMarqueeLabel _titleLabel = new();
-    private readonly Label _durationLabel = new();
+    private const int WindowWidth = 340;
+    private const int WindowHeight = 34;
+    private const int CornerRadius = 10;
+    private const int WsExLayered = 0x00080000;
+    private const int UlwAlpha = 0x00000002;
+    private const byte AcSrcOver = 0x00;
+    private const byte AcSrcAlpha = 0x01;
+    // 手绘柔光的扩散层数与基准不透明度（最终 alpha 再乘小窗背景透明度，透明度 0 时整层不绘制）
+    private const int ShadowSpread = 6;
+    private const int ShadowBaseAlpha = 95;
+
     private readonly Action _showDashboard;
-    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 1000 };
+    private readonly System.Windows.Forms.Timer _frameTimer = new() { Interval = 30 };
+    private readonly Font _titleFont = new("Microsoft YaHei UI", 9F, FontStyle.Bold);
+    private readonly Font _durationFont = new("Microsoft YaHei UI", 8.5F);
+    private readonly SettingsReader _settingsReader = new(AppContext.BaseDirectory);
+    private readonly StringFormat _durationFormat;
+    private readonly StringFormat _titleFormat;
+
+    private Bitmap? _bitmap;
+    private DateTime _lastFrameAt = DateTime.Now;
+    private DateTime _lastRefreshAt = DateTime.MinValue;
+    private DateTime _lastSettingsCheckAt = DateTime.MinValue;
+    private DateTime _settingsLastWrite = DateTime.MinValue;
+    private float _scrollPosition;
+
+    // 展示状态
+    private string _title = string.Empty;
+    private string _durationText = "--:--:--";
+    private Color _dotColor = Color.Gray;
+    private bool _breathing;
+    private DateTime _breathStartedAt = DateTime.Now;
+    private double _backgroundOpacity = 1.0;
+    private int _textWidth = 1;
+
     private Point _dragStart;
     private Point _dragStartLocation;
     private bool _movedDuringDrag;
 
     protected override bool ShowWithoutActivation => true;
 
-    private const int CornerRadius = 10;
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct BLENDFUNCTION
+    {
+        public byte BlendOp;
+        public byte BlendFlags;
+        public byte SourceConstantAlpha;
+        public byte AlphaFormat;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref Point pptDst, ref Size psize,
+        IntPtr hdcSrc, ref Point pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetDC(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteDC(IntPtr hdc);
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr SelectObject(IntPtr hdc, IntPtr hObject);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(IntPtr hObject);
 
     private static GraphicsPath BuildRoundedBounds(Rectangle bounds, int radius)
     {
@@ -31,33 +96,14 @@ internal sealed class CompactStatusForm : Form
         return path;
     }
 
-    private void ApplyRoundedRegion()
-    {
-        var region = Region;
-        Region = new Region(BuildRoundedBounds(new Rectangle(0, 0, Width, Height), CornerRadius));
-        region?.Dispose();
-    }
-
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        ApplyRoundedRegion();
-        // 小窗固定到所有虚拟桌面（任务视图 / Win+Tab 的每个桌面都可见）
-        VirtualDesktopHelper.PinToAllDesktops(Handle);
-    }
-
-    protected override void OnSizeChanged(EventArgs e)
-    {
-        base.OnSizeChanged(e);
-        if (IsHandleCreated) ApplyRoundedRegion();
-    }
-
     protected override CreateParams CreateParams
     {
         get
         {
             var parameters = base.CreateParams;
-            parameters.ClassStyle |= 0x00020000;
+            parameters.ExStyle |= WsExLayered;
+            // 不使用 CS_DROPSHADOW：该系统阴影在窗口创建后无法可靠摘除（透明度为 0 时右/下边缘仍残留黑边）。
+            // 改为在分层位图内手绘柔光，随背景透明度一起消失。
             return parameters;
         }
     }
@@ -71,47 +117,102 @@ internal sealed class CompactStatusForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        Size = new Size(340, 34);
-        MinimumSize = new Size(300, 34);
-        MaximumSize = new Size(340, 34);
-        BackColor = NativeTheme.Current.Background;
+        Size = new Size(WindowWidth, WindowHeight);
+        MinimumSize = new Size(WindowWidth, WindowHeight);
+        MaximumSize = new Size(WindowWidth, WindowHeight);
+        BackColor = Color.Black;
         Icon = TryLoadIcon();
-        Padding = new Padding(8, 0, 6, 0);
 
-        _statusDot.Dock = DockStyle.Left;
-        _statusDot.Width = 16;
-        _statusDot.BackColor = BackColor;
+        _durationFormat = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center };
+        _titleFormat = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Near, Trimming = StringTrimming.None };
 
-        // 只保留状态圆点，释放原状态文字和进程名占用的空间给标题滚动。
-        _titleLabel.Dock = DockStyle.Fill;
-        _titleLabel.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-        _titleLabel.ForeColor = NativeTheme.Current.TextPrimary;
-        _titleLabel.BackColor = BackColor;
-
-        _durationLabel.Dock = DockStyle.Right;
-        _durationLabel.Width = 76;
-        _durationLabel.Font = new Font("Microsoft YaHei UI", 8.5F);
-        _durationLabel.ForeColor = NativeTheme.Current.TextSecondary;
-        _durationLabel.TextAlign = ContentAlignment.MiddleRight;
-        _durationLabel.AutoEllipsis = true;
-
-        Controls.Add(_titleLabel);
-        Controls.Add(_durationLabel);
-        Controls.Add(_statusDot);
         MouseUp += (_, e) => HandleMouseUp(e);
-
-        foreach (Control control in Controls)
-        {
-            control.MouseDown += (_, e) => BeginDrag(e);
-            control.MouseMove += (_, e) => MoveDrag(e);
-            control.MouseUp += (_, e) => HandleMouseUp(e);
-        }
         MouseDown += (_, e) => BeginDrag(e);
         MouseMove += (_, e) => MoveDrag(e);
 
-        _timer.Tick += async (_, _) => await RefreshAsync();
-        NativeTheme.Changed += (_, _) => ApplyTheme();
-        ApplyTheme();
+        _frameTimer.Tick += OnFrameTick;
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        // 小窗固定到所有虚拟桌面（任务视图 / Win+Tab 的每个桌面都可见）
+        VirtualDesktopHelper.PinToAllDesktops(Handle);
+        _bitmap ??= new Bitmap(WindowWidth, WindowHeight, PixelFormat.Format32bppPArgb);
+        RenderFrame();
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (Visible)
+        {
+            _lastFrameAt = DateTime.Now;
+            _frameTimer.Start();
+        }
+        else
+        {
+            _frameTimer.Stop();
+        }
+    }
+
+    private void OnFrameTick(object? sender, EventArgs e)
+    {
+        var now = DateTime.Now;
+        var elapsedMs = (float)(now - _lastFrameAt).TotalMilliseconds;
+        _lastFrameAt = now;
+
+        if ((now - _lastRefreshAt).TotalSeconds >= 1)
+        {
+            _lastRefreshAt = now;
+            _ = RefreshAsync();
+        }
+        if ((now - _lastSettingsCheckAt).TotalMilliseconds >= 500)
+        {
+            _lastSettingsCheckAt = now;
+            RefreshOpacityFromSettings();
+        }
+
+        if (_textWidth > TitleRect.Width)
+        {
+            // 与旧版一致：每 13ms 滚动 1.2px
+            _scrollPosition += 1.2F * (elapsedMs / 13F);
+            var cycleWidth = _textWidth + 32;
+            if (_scrollPosition >= cycleWidth) _scrollPosition -= cycleWidth;
+        }
+        else
+        {
+            _scrollPosition = 0;
+        }
+
+        RenderFrame();
+    }
+
+    private void RefreshOpacityFromSettings()
+    {
+        try
+        {
+            var path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "时迹",
+                "settings.json");
+            if (!File.Exists(path))
+            {
+                _backgroundOpacity = 1.0;
+                return;
+            }
+
+            var lastWrite = File.GetLastWriteTimeUtc(path);
+            if (lastWrite == _settingsLastWrite) return;
+            _settingsLastWrite = lastWrite;
+
+            var snapshot = _settingsReader.Load();
+            _backgroundOpacity = Math.Clamp(snapshot.CompactWindowOpacity ?? 1.0, 0.0, 1.0);
+        }
+        catch
+        {
+            // 读取失败保持现状，不打扰小窗展示
+        }
     }
 
     private void BeginDrag(MouseEventArgs e)
@@ -163,11 +264,11 @@ internal sealed class CompactStatusForm : Form
         var area = Screen.FromPoint(Cursor.Position).WorkingArea;
         // 默认位置：屏幕正中上方吸顶（贴近工作区顶部，左右居中），与吸边间隙一致不留空隙
         Location = new Point(area.Left + (area.Width - Width) / 2, area.Top);
+        _lastRefreshAt = DateTime.MinValue;
         Show();
         WindowState = FormWindowState.Normal;
         TopMost = true;
         BringToFront();
-        _timer.Start();
         _ = RefreshAsync();
     }
 
@@ -208,40 +309,58 @@ internal sealed class CompactStatusForm : Form
         if (IsDisposed) return;
         if (response?.Status is not { } status || !response.Ok)
         {
-            _statusDot.Breathing = false;
-            _statusDot.DotColor = NativeTheme.Current.Danger;
-            _titleLabel.MarqueeText = "后台记录服务未响应";
-            _durationLabel.Text = "--:--:--";
+            _breathing = false;
+            _dotColor = NativeTheme.Current.Danger;
+            SetTitle("后台记录服务未响应");
+            _durationText = "--:--:--";
             return;
         }
 
-        _titleLabel.MarqueeText = status.ActiveWindowTitle;
+        SetTitle(status.ActiveWindowTitle);
 
         if (status.Tracking)
         {
-            _statusDot.DotColor = Color.FromArgb(58, 190, 105);
-            _statusDot.Breathing = status.IsVideoPlayback;
+            _dotColor = Color.FromArgb(58, 190, 105);
+            SetBreathing(status.IsVideoPlayback);
             var start = status.ActiveStartTime?.ToLocalTime();
-            _durationLabel.Text = start is null ? "--:--:--" : FormatElapsed(DateTime.Now - start.Value);
+            _durationText = start is null ? "--:--:--" : FormatElapsed(DateTime.Now - start.Value);
         }
         else if (status.IsManualIdle)
         {
-            _statusDot.Breathing = false;
-            _statusDot.DotColor = Color.FromArgb(242, 190, 55);
-            _durationLabel.Text = "未记录";
+            SetBreathing(false);
+            _dotColor = Color.FromArgb(242, 190, 55);
+            _durationText = "未记录";
         }
         else if (status.IsIdle)
         {
-            _statusDot.Breathing = false;
-            _statusDot.DotColor = Color.FromArgb(230, 76, 76);
-            _durationLabel.Text = "未记录";
+            SetBreathing(false);
+            _dotColor = Color.FromArgb(230, 76, 76);
+            _durationText = "未记录";
         }
         else
         {
-            _statusDot.Breathing = false;
-            _statusDot.DotColor = NativeTheme.Current.TextSecondary;
-            _durationLabel.Text = "未记录";
+            SetBreathing(false);
+            _dotColor = NativeTheme.Current.TextSecondary;
+            _durationText = "未记录";
         }
+    }
+
+    private void SetTitle(string? value)
+    {
+        var next = string.IsNullOrWhiteSpace(value) ? "无标题窗口" : value.Trim();
+        if (string.Equals(_title, next, StringComparison.Ordinal)) return;
+        _title = next;
+        _scrollPosition = 0;
+        using var measureBitmap = new Bitmap(1, 1);
+        using var measureGraphics = Graphics.FromImage(measureBitmap);
+        _textWidth = Math.Max(1, (int)Math.Ceiling(measureGraphics.MeasureString(_title, _titleFont).Width));
+    }
+
+    private void SetBreathing(bool value)
+    {
+        if (_breathing == value) return;
+        _breathing = value;
+        if (value) _breathStartedAt = DateTime.Now;
     }
 
     private static string FormatElapsed(TimeSpan value)
@@ -252,32 +371,177 @@ internal sealed class CompactStatusForm : Form
             : $"{value.Minutes:00}:{value.Seconds:00}";
     }
 
-    private void ApplyTheme()
+    private static Rectangle TitleRect => new(24, 0, WindowWidth - 24 - 82, WindowHeight);
+
+    /// <summary>
+    /// 在卡片轮廓之外绘制分层柔光（位图内手绘，替代无法运行时摘除的 CS_DROPSHADOW）。
+    /// 阴影 alpha 与背景透明度同比例缩放：透明度为 0 时整层跳过，窗口边缘不留任何黑影。
+    /// </summary>
+    private static void DrawManualShadow(Graphics graphics, double opacity)
     {
-        BackColor = NativeTheme.Current.Background;
-        _statusDot.BackColor = BackColor;
-        _titleLabel.ForeColor = NativeTheme.Current.TextPrimary;
-        _titleLabel.BackColor = BackColor;
-        _durationLabel.ForeColor = NativeTheme.Current.TextSecondary;
-        Invalidate();
+        var baseBounds = new Rectangle(0, 0, WindowWidth - 1, WindowHeight - 1);
+        var previousClip = graphics.Clip;
+        try
+        {
+            using var basePath = BuildRoundedBounds(baseBounds, CornerRadius);
+            using var outsideClip = new Region(new Rectangle(0, 0, WindowWidth, WindowHeight));
+            outsideClip.Exclude(basePath);
+            graphics.Clip = outsideClip;
+
+            for (var spread = ShadowSpread; spread >= 1; spread--)
+            {
+                var ratio = (double)(ShadowSpread - spread + 1) / ShadowSpread;
+                var alpha = (int)Math.Round(ShadowBaseAlpha * ratio * opacity);
+                if (alpha <= 0)
+                {
+                    continue;
+                }
+
+                var layerBounds = Rectangle.Inflate(baseBounds, spread, spread);
+                using var layerPath = BuildRoundedBounds(layerBounds, CornerRadius + spread);
+                using var layerBrush = new SolidBrush(Color.FromArgb(alpha, 0, 0, 0));
+                graphics.FillPath(layerBrush, layerPath);
+            }
+        }
+        finally
+        {
+            graphics.Clip = previousClip;
+            previousClip.Dispose();
+        }
     }
 
-    protected override void OnPaint(PaintEventArgs e)
+    private void RenderFrame()
     {
-        base.OnPaint(e);
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using var path = BuildRoundedBounds(new Rectangle(0, 0, Width - 1, Height - 1), CornerRadius);
-        using var pen = new Pen(NativeTheme.Current.Border, 1);
-        e.Graphics.DrawPath(pen, path);
+        if (!IsHandleCreated || _bitmap is null) return;
+
+        var palette = NativeTheme.Current;
+        using (var graphics = Graphics.FromImage(_bitmap))
+        {
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            graphics.Clear(Color.Transparent);
+
+            // 背景：填充使用可配置不透明度（圆角外像素 alpha=0，自然透明且可穿透点击）；
+            // 透明度为 0 时背景与边框都不绘制，窗口只剩文字与状态灯“浮”在桌面上。
+            var chromeVisible = _backgroundOpacity > 0;
+            if (chromeVisible)
+            {
+                // 柔光必须先于背景绘制，且裁剪到卡片轮廓之外，避免压暗半透明背景。
+                DrawManualShadow(graphics, _backgroundOpacity);
+
+                var backgroundAlpha = (int)Math.Round(255 * _backgroundOpacity);
+                using (var backgroundPath = BuildRoundedBounds(new Rectangle(0, 0, WindowWidth - 1, WindowHeight - 1), CornerRadius))
+                using (var backgroundBrush = new SolidBrush(Color.FromArgb(backgroundAlpha, palette.Background)))
+                {
+                    graphics.FillPath(backgroundBrush, backgroundPath);
+                }
+
+                // 边框随背景一起按配置隐现（0 时消失），其余情况下保持完全不透明。
+                using (var borderPath = BuildRoundedBounds(new Rectangle(0, 0, WindowWidth - 1, WindowHeight - 1), CornerRadius))
+                using (var borderPen = new Pen(palette.Border, 1))
+                {
+                    graphics.DrawPath(borderPen, borderPath);
+                }
+            }
+            else
+            {
+                // 分层窗口 alpha=0 的像素默认穿透鼠标，视觉全透明时只有文字/状态灯能点中。
+                // 用 alpha=1（1/255，肉眼不可见）铺满整个窗口矩形：外观仍是纯文字悬浮，
+                // 但整块区域都可命中，拖动/双击/右键与有背景时完全一致。
+                using var hitBrush = new SolidBrush(Color.FromArgb(1, 0, 0, 0));
+                graphics.FillRectangle(hitBrush, 0, 0, WindowWidth, WindowHeight);
+            }
+
+            // 状态灯：直径 10，位置与旧版圆点控件一致 (11, 12)；
+            // 呼吸时色相始终为绿色，仅在不透明绿色 ↔ 完全透明之间往复（不再向背景白色渐变）。
+            var dotColor = _dotColor;
+            if (_breathing)
+            {
+                const double breathPeriodMs = 2800;
+                var phase = (DateTime.Now - _breathStartedAt).TotalMilliseconds % breathPeriodMs / breathPeriodMs;
+                var t = (1 - Math.Cos(2 * Math.PI * phase)) / 2;
+                dotColor = Color.FromArgb((int)Math.Round(255 * t), _dotColor);
+            }
+            using (var dotBrush = new SolidBrush(dotColor))
+            {
+                graphics.FillEllipse(dotBrush, 11, 12, 10, 10);
+            }
+
+            // 标题：静态或跑马灯
+            var titleRect = TitleRect;
+            var titleY = (WindowHeight - _titleFont.GetHeight(graphics)) / 2F;
+            using var titleBrush = new SolidBrush(palette.TextPrimary);
+            if (_textWidth <= titleRect.Width)
+            {
+                graphics.DrawString(_title, _titleFont, titleBrush, titleRect.X, titleY, _titleFormat);
+            }
+            else
+            {
+                var cycleWidth = _textWidth + 32;
+                var state = graphics.Save();
+                graphics.SetClip(titleRect);
+                var x = titleRect.X - (int)_scrollPosition;
+                while (x < titleRect.Right)
+                {
+                    graphics.DrawString(_title, _titleFont, titleBrush, x, titleY, _titleFormat);
+                    x += cycleWidth;
+                }
+                graphics.Restore(state);
+            }
+
+            // 时长（右对齐，宽 76，右留 6px）
+            var durationRect = new Rectangle(WindowWidth - 6 - 76, 0, 76, WindowHeight);
+            using var durationBrush = new SolidBrush(palette.TextSecondary);
+            graphics.DrawString(_durationText, _durationFont, durationBrush, durationRect, _durationFormat);
+        }
+
+        PresentBitmap();
+    }
+
+    private void PresentBitmap()
+    {
+        if (_bitmap is null) return;
+
+        var screenDc = GetDC(IntPtr.Zero);
+        var memoryDc = CreateCompatibleDC(screenDc);
+        var bitmapHandle = _bitmap.GetHbitmap(Color.FromArgb(0));
+        var previousObject = SelectObject(memoryDc, bitmapHandle);
+
+        try
+        {
+            var destination = new Point(Left, Top);
+            var size = new Size(WindowWidth, WindowHeight);
+            var source = new Point(0, 0);
+            var blend = new BLENDFUNCTION
+            {
+                BlendOp = AcSrcOver,
+                BlendFlags = 0,
+                SourceConstantAlpha = 255,
+                AlphaFormat = AcSrcAlpha
+            };
+            UpdateLayeredWindow(Handle, screenDc, ref destination, ref size, memoryDc, ref source, 0, ref blend, UlwAlpha);
+        }
+        finally
+        {
+            SelectObject(memoryDc, previousObject);
+            DeleteObject(bitmapHandle);
+            DeleteDC(memoryDc);
+            ReleaseDC(IntPtr.Zero, screenDc);
+        }
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            _timer.Stop();
-            _timer.Dispose();
-            _titleLabel.Dispose();
+            _frameTimer.Stop();
+            _frameTimer.Dispose();
+            _titleFont.Dispose();
+            _durationFont.Dispose();
+            _durationFormat.Dispose();
+            _titleFormat.Dispose();
+            _bitmap?.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -286,203 +550,5 @@ internal sealed class CompactStatusForm : Form
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Assets", "app-icon.ico");
         return File.Exists(path) ? new Icon(path) : SystemIcons.Application;
-    }
-}
-
-internal sealed class StatusDotControl : Control
-{
-    private Color _dotColor = Color.Gray;
-    private bool _breathing;
-    private DateTime _breathStartedAt = DateTime.Now;
-    private const double BreathPeriodMs = 2800;
-    private readonly System.Windows.Forms.Timer _breathTimer = new() { Interval = 30 };
-
-    public Color DotColor
-    {
-        get => _dotColor;
-        set
-        {
-            if (_dotColor == value) return;
-            _dotColor = value;
-            Invalidate();
-        }
-    }
-
-    /// <summary>看视频状态：在状态绿与小窗背景色之间缓慢双向渐变（背景色随主题变量变化）。</summary>
-    public bool Breathing
-    {
-        get => _breathing;
-        set
-        {
-            if (_breathing == value) return;
-            _breathing = value;
-            if (value)
-            {
-                _breathStartedAt = DateTime.Now;
-                _breathTimer.Start();
-            }
-            else
-            {
-                _breathTimer.Stop();
-                Invalidate();
-            }
-        }
-    }
-
-    public StatusDotControl()
-    {
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
-        _breathTimer.Tick += (_, _) => Invalidate();
-    }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e);
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        var diameter = Math.Min(ClientSize.Height - 12, 10);
-        var x = (ClientSize.Width - diameter) / 2;
-        var y = (ClientSize.Height - diameter) / 2;
-        var color = _dotColor;
-        if (_breathing)
-        {
-            var phase = (DateTime.Now - _breathStartedAt).TotalMilliseconds % BreathPeriodMs / BreathPeriodMs;
-            // 0 → 小窗背景色，1 → 状态绿，正弦缓动；一个周期内 背景色→绿→背景色。
-            var t = (1 - Math.Cos(2 * Math.PI * phase)) / 2;
-            var windowColor = BackColor;
-            var r = (int)(windowColor.R + (_dotColor.R - windowColor.R) * t);
-            var g = (int)(windowColor.G + (_dotColor.G - windowColor.G) * t);
-            var b = (int)(windowColor.B + (_dotColor.B - windowColor.B) * t);
-            color = Color.FromArgb(r, g, b);
-        }
-        using var brush = new SolidBrush(color);
-        e.Graphics.FillEllipse(brush, x, y, diameter, diameter);
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            _breathTimer.Stop();
-            _breathTimer.Dispose();
-        }
-        base.Dispose(disposing);
-    }
-}
-
-internal sealed class SmoothMarqueeLabel : Control
-{
-    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 13 };
-    private string _marqueeText = string.Empty;
-    private Bitmap? _textBitmap;
-    private int _textWidth;
-    private int _offset;
-    private float _scrollPosition;
-    private int _cycleWidth;
-
-    public string? MarqueeText
-    {
-        get => _marqueeText;
-        set
-        {
-            var next = string.IsNullOrWhiteSpace(value) ? "无标题窗口" : value.Trim();
-            if (string.Equals(_marqueeText, next, StringComparison.Ordinal)) return;
-            _marqueeText = next;
-            _offset = 0;
-            _scrollPosition = 0;
-            UpdateScrollState();
-            Invalidate();
-        }
-    }
-
-    public SmoothMarqueeLabel()
-    {
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        _timer.Tick += (_, _) =>
-        {
-            if (_cycleWidth <= 0) return;
-            _scrollPosition += 1.2F;
-            if (_scrollPosition >= _cycleWidth) _scrollPosition -= _cycleWidth;
-            _offset = (int)_scrollPosition;
-            Invalidate();
-        };
-    }
-
-    protected override void OnFontChanged(EventArgs e)
-    {
-        base.OnFontChanged(e);
-        UpdateScrollState();
-    }
-
-    protected override void OnResize(EventArgs e)
-    {
-        base.OnResize(e);
-        UpdateScrollState();
-    }
-
-    private void UpdateScrollState()
-    {
-        if (ClientSize.Width <= 0 || string.IsNullOrEmpty(_marqueeText)) return;
-        _textBitmap?.Dispose();
-        _textBitmap = null;
-        using var measureBitmap = new Bitmap(1, 1);
-        using var measureGraphics = Graphics.FromImage(measureBitmap);
-        _textWidth = Math.Max(1, (int)Math.Ceiling(measureGraphics.MeasureString(_marqueeText, Font).Width));
-        _cycleWidth = _textWidth + 32;
-        if (_textWidth > ClientSize.Width)
-        {
-            _textBitmap = new Bitmap(_textWidth, Math.Max(1, ClientSize.Height), System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-            using var graphics = Graphics.FromImage(_textBitmap);
-            graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            graphics.Clear(BackColor);
-            using var brush = new SolidBrush(ForeColor);
-            var y = (ClientSize.Height - Font.GetHeight(graphics)) / 2F;
-            graphics.DrawString(_marqueeText, Font, brush, 0, y);
-            if (Visible) _timer.Start();
-        }
-        else
-        {
-            _timer.Stop();
-            _offset = 0;
-        }
-        Invalidate();
-    }
-
-    protected override void OnVisibleChanged(EventArgs e)
-    {
-        base.OnVisibleChanged(e);
-        if (Visible) UpdateScrollState();
-        else _timer.Stop();
-    }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e);
-        e.Graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
-        e.Graphics.PixelOffsetMode = PixelOffsetMode.Half;
-        if (_textBitmap is null)
-        {
-            e.Graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            using var brush = new SolidBrush(ForeColor);
-            var y = (ClientSize.Height - Font.GetHeight(e.Graphics)) / 2F;
-            e.Graphics.DrawString(_marqueeText, Font, brush, 0, y);
-            return;
-        }
-        var x = -_offset;
-        while (x < ClientSize.Width)
-        {
-            e.Graphics.DrawImageUnscaled(_textBitmap, x, 0);
-            x += _cycleWidth;
-        }
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            _timer.Stop();
-            _timer.Dispose();
-            _textBitmap?.Dispose();
-        }
-        base.Dispose(disposing);
     }
 }

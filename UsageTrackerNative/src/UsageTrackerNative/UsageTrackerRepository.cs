@@ -980,6 +980,12 @@ public sealed class UsageTrackerRepository
             ManualSubjects = state.ManualSubjects is null
                 ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, string>(state.ManualSubjects, StringComparer.OrdinalIgnoreCase),
+            ManualSubjectScopes = state.ManualSubjectScopes is null
+                ? new Dictionary<string, List<ManualSubjectScope>>(StringComparer.OrdinalIgnoreCase)
+                : state.ManualSubjectScopes.ToDictionary(
+                    x => x.Key,
+                    x => x.Value.Select(scope => new ManualSubjectScope(scope.EffectiveFrom, scope.Subject)).ToList(),
+                    StringComparer.OrdinalIgnoreCase),
             SubjectKeywordRules = state.SubjectKeywordRules?.ToDictionary(x => x.Key, x => x.Value.ToList(), StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase),
             SubjectDefinitions = state.SubjectDefinitions?.Select(x => x.Clone()).ToList() ?? [],
             SubjectOptions = state.SubjectOptions?.ToList() ?? [],
@@ -988,6 +994,7 @@ public sealed class UsageTrackerRepository
             ThemeAccentRecentColors = state.ThemeAccentRecentColors?.ToList() ?? [],
             ThemeAccentSlots = state.ThemeAccentSlots?.ToList() ?? [],
             IdleTimeoutMinutes = state.IdleTimeoutMinutes,
+            CompactWindowOpacity = state.CompactWindowOpacity,
             ManualIdleShortcutText = state.ManualIdleShortcutText
         };
     }

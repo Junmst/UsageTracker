@@ -72,7 +72,8 @@ public static class SearchExpressionMatcher
         }
 
         return matches
-            .OrderByDescending(match => match.TermCount)
+            .OrderByDescending(match => match.MatchedTermMaxLength)
+            .ThenByDescending(match => match.TermCount)
             .ThenByDescending(match => match.ExpressionLength)
             .ThenBy(match => match.SubjectOrder)
             .ThenBy(match => match.RuleOrder)
@@ -81,6 +82,15 @@ public static class SearchExpressionMatcher
     }
 
     public static string? ResolveSubjectByKeywordRules(
+        IEnumerable<SubjectDefinition> definitions,
+        IReadOnlyDictionary<string, List<string>> keywordRules,
+        string processName,
+        string windowTitle)
+        => ResolveKeywordRule(definitions, keywordRules, processName, windowTitle)?.Subject;
+
+    // 与 ResolveSubjectByKeywordRules 同一套排序规则，但额外返回获胜规则的原文
+    //（仅去除首尾空白，+、*、-、() 等逻辑连接符原样保留），供界面展示“命中了哪条关键词”。
+    public static KeywordRuleHit? ResolveKeywordRule(
         IEnumerable<SubjectDefinition> definitions,
         IReadOnlyDictionary<string, List<string>> keywordRules,
         string processName,
@@ -110,14 +120,42 @@ public static class SearchExpressionMatcher
             AddMatchingRules(matches, definition.Name, keywordRules, processName, titleParts, order++);
         }
 
-        return matches
+        var winner = matches
             .OrderByDescending(match => match.MatchPriority)
+            .ThenByDescending(match => match.MatchedTermMaxLength)
             .ThenByDescending(match => match.TermCount)
             .ThenByDescending(match => match.ExpressionLength)
             .ThenBy(match => match.SubjectOrder)
             .ThenBy(match => match.RuleOrder)
-            .FirstOrDefault()
-            ?.Subject;
+            .FirstOrDefault();
+
+        return winner is null ? null : new KeywordRuleHit(winner.Subject, winner.Rule, winner.MatchPriority == 2);
+    }
+
+    // 命中词项的最大字面长度：多个关键词都命中时，覆盖文本越长越精准。
+    // 例：标题"计算机专项知识"，单词"计算机专项知识"(7) 应胜过"计算机"(3)，
+    // 也应胜过复合短词"计算机*学习"(命中词项最大仅 3/2)。
+    // 否定词无需特判：它若出现在文本中整条规则就不命中；不出现时 Contains 自然为 false。
+    private static int GetLongestMatchedTermLength(string expression, params string[] domains)
+    {
+        var terms = expression.Split(OperatorChars, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var best = 0;
+        foreach (var term in terms)
+        {
+            if (term.Length <= best)
+            {
+                continue;
+            }
+            foreach (var domain in domains)
+            {
+                if (domain.Contains(term, StringComparison.OrdinalIgnoreCase))
+                {
+                    best = term.Length;
+                    break;
+                }
+            }
+        }
+        return best;
     }
 
     private static void AddMatchingRules(
@@ -147,7 +185,10 @@ public static class SearchExpressionMatcher
                 continue;
             }
 
-            matches.Add(new SubjectKeywordRuleMatch(subject, subjectOrder, ruleOrder, GetTermCount(rule), rule.Trim().Length, matchPriority));
+            var matchedTermMaxLength = matchPriority == 2
+                ? GetLongestMatchedTermLength(rule, titleParts.PrimaryTitle)
+                : GetLongestMatchedTermLength(rule, processName, titleParts.FullTitle);
+            matches.Add(new SubjectKeywordRuleMatch(subject, subjectOrder, ruleOrder, GetTermCount(rule), rule.Trim().Length, matchPriority, matchedTermMaxLength, rule.Trim()));
         }
     }
 
@@ -184,11 +225,16 @@ public static class SearchExpressionMatcher
                 continue;
             }
 
-            matches.Add(new SubjectKeywordRuleMatch(subject, subjectOrder, ruleOrder, GetTermCount(rule), rule.Trim().Length, 2));
+            var matchedTermMaxLength = GetLongestMatchedTermLength(rule, titleParts.PrimaryTitle);
+            matches.Add(new SubjectKeywordRuleMatch(subject, subjectOrder, ruleOrder, GetTermCount(rule), rule.Trim().Length, 2, matchedTermMaxLength, rule.Trim()));
         }
     }
 
-    private sealed record SubjectKeywordRuleMatch(string Subject, int SubjectOrder, int RuleOrder, int TermCount, int ExpressionLength, int MatchPriority);
+    private sealed record SubjectKeywordRuleMatch(string Subject, int SubjectOrder, int RuleOrder, int TermCount, int ExpressionLength, int MatchPriority, int MatchedTermMaxLength, string Rule);
+
+    // 关键词规则命中结果：Subject 为归属分类，Rule 为用户配置的规则原文（连接符原样保留），
+    // MatchedInPrimaryTitle 表示是否命中浏览器主标题（优先级高于进程名/完整标题命中）。
+    public sealed record KeywordRuleHit(string Subject, string Rule, bool MatchedInPrimaryTitle);
 
     private readonly record struct BrowserWindowTitleParts(string FullTitle, string PrimaryTitle)
     {

@@ -42,7 +42,8 @@ builder.WebHost.ConfigureKestrel(options =>
 var app = builder.Build();
 
 app.UseDefaultFiles();
-// index.html 禁用缓存：前端重发布后 hash 文件名变化，避免 WebView2 用缓存旧页面加载已删除的旧 bundle
+// index.html 禁用缓存：前端重发布后 hash 文件名变化，避免 WebView2 用缓存旧页面加载已删除的旧 bundle。
+// /assets/ 下是 Vite 生成的内容 hash 文件，文件名随内容变化，可永久缓存（看板重开时壳秒开、省内存销毁后无需重下）。
 app.UseStaticFiles(new StaticFileOptions
 {
     OnPrepareResponse = ctx =>
@@ -50,6 +51,10 @@ app.UseStaticFiles(new StaticFileOptions
         if (ctx.File.Name.Equals("index.html", StringComparison.OrdinalIgnoreCase))
         {
             ctx.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+        }
+        else if (ctx.Context.Request.Path.StartsWithSegments("/assets", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
         }
     }
 });
@@ -375,7 +380,8 @@ app.MapGet("/api/settings", () =>
             themeAccentSlots = snapshot.ThemeAccentSlots ?? new List<string>(),
             subjectCount = snapshot.SubjectDefinitions?.Count ?? 0,
             subjectDefinitions = snapshot.SubjectDefinitions ?? new List<SubjectDefinitionDto>(),
-            idleTimeoutMinutes = snapshot.IdleTimeoutMinutes
+            idleTimeoutMinutes = snapshot.IdleTimeoutMinutes,
+            compactWindowOpacity = snapshot.CompactWindowOpacity
         };
     });
 
@@ -479,6 +485,19 @@ app.MapPost("/api/settings/idle-timeout", async (JsonElement body, CancellationT
     if (minutes < 1 || minutes > 1440)
         return Results.BadRequest(new { error = "空闲判定时长需在 1-1440 分钟之间" });
     var response = await NativeControlClient.SendWebCommandAsync("settings-set-idle-timeout", new { minutes = minutes.ToString() }, cancellationToken);
+    if (response?.Ok != true) return Results.Problem(response?.Error ?? "设置保存失败", statusCode: 503);
+    InvalidateWebCaches();
+    return Results.NoContent();
+});
+
+app.MapPost("/api/settings/compact-opacity", async (JsonElement body, CancellationToken cancellationToken) =>
+{
+    if (!body.TryGetProperty("opacity", out var opacityValue) || opacityValue.ValueKind != JsonValueKind.Number)
+        return Results.BadRequest(new { error = "小窗背景透明度无效" });
+    var opacity = opacityValue.GetDouble();
+    if (opacity < 0.0 || opacity > 1.0)
+        return Results.BadRequest(new { error = "小窗背景透明度需在 0-1 之间" });
+    var response = await NativeControlClient.SendWebCommandAsync("settings-set-compact-opacity", new { opacity = opacity.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) }, cancellationToken);
     if (response?.Ok != true) return Results.Problem(response?.Error ?? "设置保存失败", statusCode: 503);
     InvalidateWebCaches();
     return Results.NoContent();

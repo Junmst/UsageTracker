@@ -5,6 +5,8 @@ export interface SessionDto {
   startTime: string;
   endTime?: string | null;
   manualSubject?: string | null;
+  subjectSource?: string | null;
+  matchedKeywordRule?: string | null;
   parallelActivities?: ParallelActivityDto[];
   lastCapturedAt?: string | null;
   durationSeconds?: number;
@@ -22,6 +24,8 @@ export interface BucketStat {
   key: string;
   seconds: number;
   sessionCount: number;
+  /** 后台并行播放时长（秒），不计入总使用时长 */
+  parallelSeconds?: number;
 }
 
 export interface DailyPoint {
@@ -122,6 +126,7 @@ export interface SettingsSnapshot {
   subjectCount: number;
   subjectDefinitions: SubjectDefinition[];
   idleTimeoutMinutes?: number | null;
+  compactWindowOpacity?: number | null;
 }
 
 export interface SubjectManagementSnapshot {
@@ -167,6 +172,9 @@ const pendingRequests = new Map<string, Promise<unknown>>();
 export function invalidateResponseCache(): void {
   responseCache.clear();
 }
+
+// 清理已废弃的磁盘缓存库（看板关闭=后台常驻后不再需要，打开页面即自动清除旧版本残留）
+try { indexedDB.deleteDatabase('shiji-http-cache'); } catch { /* 隐私模式等场景忽略 */ }
 
 async function get<T>(url: string, ttlMs = 15_000, forceRefresh = false): Promise<T> {
   const cached = responseCache.get(url);
@@ -236,6 +244,7 @@ export const api = {
   settings: () => get<SettingsSnapshot>('/api/settings'),
   saveAppearance: (theme: string, accent: string) => send<void>('/api/settings/appearance', 'POST', { theme, accent }),
   saveIdleTimeout: (minutes: number) => send<void>('/api/settings/idle-timeout', 'POST', { minutes }),
+  saveCompactOpacity: (opacity: number) => send<void>('/api/settings/compact-opacity', 'POST', { opacity }),
   subjectManagement: (forceRefresh = false) => get<SubjectManagementSnapshot>('/api/subject-management', 0, forceRefresh),
   subjectCommand: (command: string, args: Record<string, unknown> = {}) => send<{ success: boolean; message?: string; data?: unknown }>('/api/subject-management/command', 'POST', { command, args }),
   searchVersion: (forceRefresh = false) =>

@@ -6,6 +6,8 @@ interface HotkeyInputProps {
   disabled?: boolean;
   /** 捕获到有效组合键时回调：modifiers 为 Win32 修饰位（Alt=1 Ctrl=2 Shift=4 Win=8），key 为虚拟键码 */
   onCapture: (modifiers: number, key: number) => void;
+  /** 在输入框内按下 Delete 键时回调：清除当前快捷键 */
+  onClear?: () => void;
 }
 
 const MOD_ALT = 0x0001;
@@ -39,8 +41,8 @@ function formatGesture(modifiers: number, key: number): string {
   return parts.join(' + ');
 }
 
-/** 只读的快捷键捕获输入框：聚焦后按下「修饰键 + 普通键」即完成录入。 */
-export function HotkeyInput({ value, disabled, onCapture }: HotkeyInputProps) {
+/** 只读的快捷键捕获输入框：聚焦后按下「修饰键 + 普通键」即完成录入；按下 Delete 清除当前快捷键。 */
+export function HotkeyInput({ value, disabled, onCapture, onClear }: HotkeyInputProps) {
   const [capturing, setCapturing] = useState(false);
   const [pendingGesture, setPendingGesture] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -63,6 +65,15 @@ export function HotkeyInput({ value, disabled, onCapture }: HotkeyInputProps) {
     // 纯修饰键不完成录入，仅提示继续按普通键
     if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) {
       setPendingGesture(null);
+      return;
+    }
+    // Delete 键：清除已设置的快捷键（未设置时不触发请求）
+    if (event.key === 'Delete') {
+      setCapturing(false);
+      setPendingGesture(null);
+      if (value) {
+        onClear?.();
+      }
       return;
     }
     const modifiers =
